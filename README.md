@@ -69,21 +69,40 @@ python RandSeqGen.py [-h] [-v] -l LENGTH [-n NUMBER] [-b BATCH] [-p PROCESSOR] [
 - `--verbose`
   - Enable detailed progress output
 
+- `--filter_n`
+  - Avoid using reference sequence with N
+
 ## Examples
 
 ### Generate Random Sequences
 
-```bash
+```sh
 # Generate 100 sequences of 1kb each in 2 batches
 python RandSeqGen.py -l 1kb -n 100 -b 2
 ```
 
 ### Generate Reference-Based Sequences
 
-```bash
-# Generate sequences using built-in TIR reference library with 20% random bases
-python RandSeqGen.py -l 10kb -n 100 -b 2 -r TIR
+#### Function Test
+
+```sh
+python RandSeqGen.py -l 10kb -n 100 -b 2 -r lib/test -w 0.8 -r lib/TIR/maize -w 0.2 --track
 ```
+
+#### Based on One Reference Library (TIR/maize)
+
+```sh
+# Generate sequences using built-in maize TIR reference library with 20% random bases
+python RandSeqGen.py -l 10kb -n 100 -b 2 -r lib/TIR/maize
+```
+
+#### Based on Multiple Reference Library (TIR/maize and TIR/rice)
+
+```sh
+# Generate sequences using built-in maize and rice TIR reference libraries with 20% random bases, filter out reference sequences containing N
+python RandSeqGen.py -l 10kb -n 100 -b 2 -r lib/TIR/maize -r lib/TIR/rice --filter_n
+```
+
 
 ## Output Format
 
