@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Random DNA Sequence Generator
+Random DNA Sequence Generator with Insertion
 
-This program generates random DNA sequences or combines reference sequences with random bases
-to create new sequences. It supports multiprocessing for efficient sequence generation.
+This program takes an input DNA sequence and performs random insertions using sequences
+from a reference library. It supports multiprocessing for efficient sequence generation.
 
 Author: Tianyu Lu (tlu83@wisc.edu)
 Date: 2024-11-27
@@ -19,14 +19,12 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
-VERSION = "v0.5.0"
+VERSION = "v0.1.0"
 INFO = ("by Tianyu (Sky) Lu (tlu83@wisc.edu)\n"
         "released under LGPL-2.1 license")
 
 # PRE-DEFINED PARAMETERS
 NUCLEOTIDES = ["A", "T", "G", "C"]
-DEFAULT_RANDOM_BASE_RATIO = 0.2
-MINIMUM_RANDOM_SEGMENT_NUM = 4
 DEFAULT_ALLOCATED_CPU_CORES = os.cpu_count() - 2 if os.cpu_count() > 2 else 1
 DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqGen-Result"
 
@@ -355,290 +353,216 @@ def _load_multiple_ref_libs(ref_lib_path_list: List[str], ref_lib_weight_list: O
 
 class SeqGenerator:
     """
-    Class for generating random DNA sequences with parallelization.
-
-    This class handles both purely random sequence generation and reference-based
-    sequence generation with random base insertion.
+    Class for generating sequences with random insertions from reference libraries.
     """
 
-    def __init__(self, length: str, number: int, batch: int, processors: int, output_dir: str,
+    def __init__(self, input_file: str, insertion: int, iteration: int, batch: int, processors: int, output_dir: str,
                  ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
-                 num_segment: Optional[int] = None, random_ratio: float = DEFAULT_RANDOM_BASE_RATIO,
                  flag_verbose: bool = False, flag_filter_n: bool = False, flag_track: bool = False):
-        self.seq_length: int = process_length(length)
-        self.seq_number: int = number
-        self.batch_number: int = batch
-        self.processors: int = processors
-        self.output_dir_abs_path: str = os.path.abspath(output_dir)
-        self.ref_list: Optional[List[str]] = ref_lib
-        self.ref_len_list: Optional[List[int]] = None
-        self.ref_weight_list: Optional[List[float]] = ref_lib_weight
-        self.num_segment: Optional[int] = num_segment
-        self.random_ratio: float = random_ratio
-        self.flag_verbose: bool = flag_verbose
-        self.flag_filter_n: bool = flag_filter_n
-        self.flag_track: bool = flag_track
+        """
+        Initialize the sequence generator.
 
-        self._pre_check()
+        Args:
+            input_file (str): Path to the input sequence file
+            insertion (int): Number of insertions per sequence
+            iteration (int): Number of times to iterate the insertion process
+            batch (int): Number of sequences to generate in each batch
+            processors (int): Number of processors to use
+            output_dir (str): Directory to save output files
+            ref_lib (List[str], optional): List of reference library file paths
+            ref_lib_weight (List[float], optional): Weights for reference libraries
+            flag_verbose (bool): Whether to print verbose output
+            flag_filter_n (bool): Whether to filter out sequences containing N
+            flag_track (bool): Whether to track reference sequences used
+        """
+        self.input_file = input_file
+        self.insertion = insertion
+        self.iteration = iteration
+        self.batch = batch
+        self.processors = processors
+        self.output_dir = output_dir
+        self.flag_verbose = flag_verbose
+        self.flag_filter_n = flag_filter_n
+        self.flag_track = flag_track
 
-        self.ref_list, self.ref_len_list, self.ref_weight_list = _load_multiple_ref_libs(
-            ref_lib, ref_lib_weight, self.seq_length // self.random_ratio, flag_filter_n)
+        # Load input sequence
+        try:
+            self.input_sequences = list(SeqIO.parse(input_file, "fasta"))
+            if not self.input_sequences:
+                raise SystemExit(f"ERROR: No sequences found in input file {input_file}")
+        except Exception as e:
+            raise SystemExit(f"ERROR: Failed to load input file {input_file}: {str(e)}")
 
-        if not self.ref_list:
-            self.ref_list = None
-            self.ref_len_list = None
-            self.ref_weight_list = None
-            self.num_segment = None
-            if ref_lib:
-                print("WARN: No reference sequences found in the specified reference libraries! "
-                      "Two possible reasons:\n"
-                      "1. Length of sequence does not meet the requirement "
-                      "(length of sequence must >= random_ratio * shortest reference sequence's length).\n"
-                      "2. Specified reference library does not contain any reference sequences.\n"
-                      "Referenced mode has been disabled and program will run in random mode.")
-
-        if self.ref_list and self.flag_track:
-            print("INFO: Used reference sequences will be tracked.")
-
-        if self.ref_list and not self.num_segment:
-            self.num_segment = self.seq_length // self.ref_len_list[-1]
-            len_ref_len_list = len(self.ref_len_list)
-            if self.num_segment < MINIMUM_RANDOM_SEGMENT_NUM:
-                self.num_segment = self.seq_length // self.ref_len_list[len_ref_len_list * 3 // 4]
-            if self.num_segment < MINIMUM_RANDOM_SEGMENT_NUM:
-                self.num_segment = self.seq_length // self.ref_len_list[len_ref_len_list // 2]
-            if self.num_segment < MINIMUM_RANDOM_SEGMENT_NUM:
-                self.num_segment = self.seq_length // self.ref_len_list[len_ref_len_list // 4]
-            if self.num_segment < MINIMUM_RANDOM_SEGMENT_NUM:
-                self.num_segment = MINIMUM_RANDOM_SEGMENT_NUM
-
-        self.random_length = int(self.seq_length * self.random_ratio)
+        # Load reference sequences
+        if ref_lib:
+            ref_lib_data = _load_multiple_ref_libs(ref_lib, ref_lib_weight, None, flag_filter_n)
+            if ref_lib_data:
+                self.ref_sequences, _, self.ref_weights = ref_lib_data
+            else:
+                raise SystemExit("ERROR: No valid reference sequences loaded")
+        else:
+            raise SystemExit("ERROR: Reference library is required for insertion")
 
     def _pre_check(self):
         """
         Perform pre-execution checks.
-
-        Raises:
-            SystemExit: If any validation checks fail
         """
-        if self.random_ratio < 0 or self.random_ratio > 1:
-            raise ValueError("ERROR: Ratio of random bases must be between 0 and 1!")
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
 
-        if self.processors < 1:
-            raise ValueError("ERROR: Number of processors must be at least 1!")
-
-        if not self.ref_list:
-            print("INFO: Random mode execution.")
-            if self.ref_weight_list:
-                print("WARN: weights for each reference library is specified but will be ignored.")
-        else:
-            print("INFO: Referenced mode execution.")
-            len_ref_lib = len(self.ref_list)
-            print(f"INFO: {len_ref_lib} reference libraries are used.")
-            if self.ref_weight_list:
-                if len_ref_lib != len(self.ref_weight_list):
-                    if len_ref_lib == 1:
-                        print("WARN: Multiple weights are specified but only one reference library is specified. "
-                              "Weights will be ignored.")
-                        self.ref_weight_list = None
-                    else:
-                        raise ValueError("ERROR: Number of reference libraries and weights must be the same!")
-                if sum(self.ref_weight_list) != 1.0:
-                    print("WARN: The sum of weights for all reference libraries is not 1.0.")
-
-    def _generate_single_referenced_sequence(self, seq_id: str) -> Tuple[SeqRecord, List[SeqRecord]]:
+    def _perform_single_insertion(self, sequence: str) -> Tuple[str, Optional[SeqRecord]]:
         """
-        Generate a sequence combining reference segments with random nucleotides.
-
-        This method:
-        1. Calculates random segment distribution
-        2. Interleaves random segments with reference sequences
-        3. Maintains intact reference sequences
-        4. Falls back to random nucleotides when no suitable reference is found
-
-        Returns: 
-            Tuple[SeqRecord, List[SeqRecord]]
-                - SeqRecord: Generated sequence combining reference and random segments
-                - List[SeqRecord]: List of reference sequences
-        """
-        random_segment_lengths: List[int] = generate_random_segment_lengths(self.num_segment, self.random_length)
-
-        sequence: List[str] = []
-        reference_sequences: List[SeqRecord] = []
-        current_length: int = 0
-        random_idx: int = 0
-
-        while current_length < self.seq_length:
-            # Add random segment
-            if random_idx < len(random_segment_lengths):
-                sequence.append(generate_random_sequence(random_segment_lengths[random_idx]))
-                current_length += random_segment_lengths[random_idx]
-                random_idx += 1
-
-            # Try to add reference segment
-            if current_length < self.seq_length:
-                remaining = self.seq_length - current_length
-                suitable_refs_idx = binary_search_suitable_refs_index(self.ref_len_list, remaining)
-
-                if suitable_refs_idx > 0:
-                    if self.ref_weight_list:
-                        ref_seq: str = random.choices(self.ref_list[:suitable_refs_idx],
-                                                      weights=self.ref_weight_list[:suitable_refs_idx], k=1)[0]
-                    else:
-                        ref_seq: str = random.choice(self.ref_list[:suitable_refs_idx])
-                    sequence.append(ref_seq)
-                    len_ref_seq = len(ref_seq)
-                    new_length = current_length + len_ref_seq
-                    if self.flag_track:
-                        ref_seq_id = f"{seq_id}_{current_length}_{new_length}-+-{len_ref_seq}"
-                        reference_sequences.append(create_sequence_record(ref_seq, ref_seq_id))
-                    current_length = new_length
-                else:
-                    sequence.append(generate_random_sequence(remaining))
-                    current_length += remaining
-
-        return create_sequence_record("".join(sequence), seq_id), reference_sequences
-
-    def _generate_single_sequence(self, seq_id: str, verbose: bool = False) -> Tuple[SeqRecord, Optional[List[SeqRecord]]]:
-        """
-        Generate a single sequence with appropriate mode.
+        Perform a single insertion on the given sequence.
 
         Args:
-            seq_id (str): ID for the sequence to be generated
-
-        Returns: 
-            Tuple[SeqRecord, Optional[List[SeqRecord]]]
-                - SeqRecord: Generated sequence as a BioPython SeqRecord object
-                - List[SeqRecord] (Optional): List of reference sequences, empty if no reference sequences are used,
-                                              or None if executed in random mode
-        """
-
-        if not self.ref_list:
-            seq: SeqRecord = create_sequence_record(generate_random_sequence(self.seq_length), seq_id)
-            return seq, None
-
-        seq, ref_seqs = self._generate_single_referenced_sequence(seq_id)
-        return seq, ref_seqs
-
-    def _generate_single_batch(self, batch: int, verbose: bool = False) -> Tuple[List[SeqRecord], Optional[List[SeqRecord]]]:
-        """
-        Generate a batch of sequences using multiprocessing.
-
-        Args:
-            batch (int): Batch number to generate
+            sequence (str): The sequence to insert into
 
         Returns:
-            Tuple[List[SeqRecord], Optional[List[SeqRecord]]]
-                - List[SeqRecord]: List of generated sequences for this batch
-                - Optional[List[SeqRecord]]: List of reference sequences, empty if no reference sequences are used,
-                                              or None if executed in random mode
+            Tuple[str, Optional[SeqRecord]]: The modified sequence and the used reference if tracking
         """
-        print(f"Generating batch {batch}...")
-
-        mp_args_list = [(f"seq_{i}_batch_{batch}_len_{self.seq_length}", verbose) for i in range(self.seq_number)]
-
-        with mp.Pool(self.processors) as pool:
-            sequences, ref_seqs_list = zip(*pool.starmap(self._generate_single_sequence, mp_args_list))
+        # Choose random insertion point
+        insert_pos = random.randint(0, len(sequence))
         
-        sequences: List[SeqRecord] = list(sequences)
+        # Choose random reference sequence
+        ref_seq = random.choices(self.ref_sequences, weights=self.ref_weights, k=1)[0]
+        
+        # Perform insertion
+        new_sequence = sequence[:insert_pos] + ref_seq + sequence[insert_pos:]
+        
+        if self.flag_track:
+            return new_sequence, create_sequence_record(ref_seq, f"ref_used_at_{insert_pos}")
+        return new_sequence, None
 
-        if not self.ref_list or not self.flag_track:
-            return sequences, None
+    def _process_single_sequence(self, seq_record: SeqRecord, seq_num: int) -> Tuple[SeqRecord, Optional[List[SeqRecord]]]:
+        """
+        Process a single sequence through all iterations.
 
-        return sequences, list(itertools.chain.from_iterable(ref_seqs_list))
+        Args:
+            seq_record (SeqRecord): The input sequence record
+            seq_num (int): The sequence number
+
+        Returns:
+            Tuple[SeqRecord, Optional[List[SeqRecord]]]: The processed sequence and used references if tracking
+        """
+        current_seq = str(seq_record.seq)
+        used_refs = [] if self.flag_track else None
+        
+        for i in range(self.iteration):
+            for j in range(self.insertion):
+                current_seq, used_ref = self._perform_single_insertion(current_seq)
+                if self.flag_track and used_ref:
+                    used_refs.append(used_ref)
+        
+        new_id = f"{seq_record.id}_iter{self.iteration}_ins{self.insertion}"
+        return create_sequence_record(current_seq, new_id), used_refs
+
+    def _process_batch(self, batch_num: int) -> Tuple[List[SeqRecord], Optional[List[SeqRecord]]]:
+        """
+        Process a batch of sequences.
+
+        Args:
+            batch_num (int): The batch number
+
+        Returns:
+            Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: The processed sequences and used references if tracking
+        """
+        start_idx = batch_num * self.batch
+        end_idx = min(start_idx + self.batch, len(self.input_sequences))
+        
+        processed_seqs = []
+        all_used_refs = [] if self.flag_track else None
+        
+        for i, seq_record in enumerate(self.input_sequences[start_idx:end_idx], start=start_idx):
+            if self.flag_verbose:
+                print(f"Processing sequence {i + 1}/{len(self.input_sequences)}")
+            
+            processed_seq, used_refs = self._process_single_sequence(seq_record, i + 1)
+            processed_seqs.append(processed_seq)
+            
+            if self.flag_track and used_refs:
+                all_used_refs.extend(used_refs)
+        
+        return processed_seqs, all_used_refs
 
     def execute(self):
         """
-        Execute the entire sequence generation process, 
-        generates sequences in batches using parallel processing and saves them to separate fasta files
+        Execute the sequence generation process.
         """
-        os.makedirs(self.output_dir_abs_path, exist_ok=True)
-
-        for batch in range(1, self.batch_number + 1):
-            sequences, ref_seqs = self._generate_single_batch(batch, self.flag_verbose)
-            if not self.ref_list or not self.flag_track or not ref_seqs:
-                output_file_path: str = os.path.join(self.output_dir_abs_path, f"sequences_batch_{batch}.fa")
-                SeqIO.write(sequences, output_file_path, "fasta")
-                print(f"Saved batch {batch}")
-            else:
-                batch_results_dict: Dict[str, List[SeqRecord]] = {
-                    f"batch_{batch}.fa": sequences,
-                    f"batch_{batch}_ref.fa": ref_seqs
-                }
-                save_multi_fasta_from_dict(batch_results_dict, self.output_dir_abs_path)
-                print(f"Saved batch {batch} with tracked references")
-
-# ======================================================================================================================
+        self._pre_check()
+        
+        total_batches = (len(self.input_sequences) + self.batch - 1) // self.batch
+        
+        if self.processors > 1 and total_batches > 1:
+            with mp.Pool(self.processors) as pool:
+                results = pool.map(self._process_batch, range(total_batches))
+        else:
+            results = [self._process_batch(i) for i in range(total_batches)]
+        
+        # Combine results
+        all_sequences = []
+        all_refs = [] if self.flag_track else None
+        
+        for seqs, refs in results:
+            all_sequences.extend(seqs)
+            if self.flag_track and refs:
+                all_refs.extend(refs)
+        
+        # Save results
+        output_dict = {"sequences.fasta": all_sequences}
+        if self.flag_track and all_refs:
+            output_dict["used_refs.fasta"] = all_refs
+        
+        save_multi_fasta_from_dict(output_dict, self.output_dir)
 
 def main():
-    """
-    Main entry point for the sequence generator.
-    """
-    parser = argparse.ArgumentParser(prog="RandomSequenceGenerator")
-    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}\n{INFO}")
+    """Main function to handle command line arguments and execute the program."""
+    parser = argparse.ArgumentParser(description=f"Random DNA Sequence Generator with Insertion {VERSION}\n{INFO}",
+                                   formatter_class=argparse.RawDescriptionHelpFormatter)
+    
+    # Required arguments
+    parser.add_argument("-i", "--input", required=True,
+                       help="Input sequence file in FASTA format")
+    parser.add_argument("-s", "--insertion", type=int, required=True,
+                       help="Number of insertions per sequence")
+    parser.add_argument("--iteration", type=int, required=True,
+                       help="Number of times to iterate the insertion process")
+    
+    # Optional arguments
+    parser.add_argument("-b", "--batch", type=int, default=1,
+                       help="Number of sequences to process in each batch")
+    parser.add_argument("-p", "--processors", type=int, default=DEFAULT_ALLOCATED_CPU_CORES,
+                       help="Number of processors to use")
+    parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_REL_PATH,
+                       help="Output directory path")
+    parser.add_argument("-r", "--ref", nargs="+",
+                       help="Reference sequence library file paths")
+    parser.add_argument("-w", "--weight", type=float, nargs="+",
+                       help="Weights for reference libraries")
+    parser.add_argument("--verbose", action="store_true",
+                       help="Print verbose output")
+    parser.add_argument("--filter-n", action="store_true",
+                       help="Filter out sequences containing N")
+    parser.add_argument("--track", action="store_true", help="Track and save used reference sequences")
 
-    parser.add_argument("-l", "--length", help="Length of each sequence (e.g. 100, 1kb, 1mb)", required=True)
-    parser.add_argument("-n", "--number", help="Number of sequences in each file (Optional, default: 1)",
-                        type=int, default=1)
-    parser.add_argument("-b", "--batch", help="Number of generated fasta files (Optional, default: 1)",
-                        type=int, default=1)
-    parser.add_argument("-p", "--processors", help="Number of processor cores allowed to be used by RandSeqGen "
-                                                  f"(Optional, default: {DEFAULT_ALLOCATED_CPU_CORES}). "
-                                                  "Please use the number of logical processor cores.",
-                        type=int, default=DEFAULT_ALLOCATED_CPU_CORES)
-    parser.add_argument("-o", "--output", help="Output directory path "
-                                               f"(Optional, default: {DEFAULT_OUTPUT_DIR_ABS_PATH})",
-                        default=DEFAULT_OUTPUT_DIR_ABS_PATH)
-    parser.add_argument("-r", "--reference", help="Path to reference library directory or file (Optional)."
-                                                  "If not specified, the program will generate complete "
-                                                  "random sequence", action="append", default=[])
-    parser.add_argument("-w", "--weight", help="Weight for each reference library when multiple reference library "
-                                                "are specified (Optional). The weights' sum is SUGGESTED to be 1.0 but "
-                                                "not required. Will be ignored if only one reference library is used",
-                                                type=float, action="append", default=[])
-    parser.add_argument("-s", "--segment", help="Number of randomly split segments for filling in reference sequences "
-                                                "(Optional). Program will try to fill every segment with one suitable reference "
-                                                "sequence but this is not guaranteed, i.e. the total number of reference sequences "
-                                                "used <= number of randomly split segments",
-                        type=int, default=None)
-    parser.add_argument("--ratio", help="Ratio of random bases in reference mode "
-                                        f"(Optional, default: {DEFAULT_RANDOM_BASE_RATIO})",
-                        type=float, default=DEFAULT_RANDOM_BASE_RATIO)
+    args = parser.parse_args()
 
-    # parser.add_argument("--verbose", help="Verbose mode (Optional). Will show more execution details",
-    #                     action="store_true")
-    parser.add_argument("--filter_n", help="Avoid using reference sequence with N (Optional)",
-                        action="store_true")
-    parser.add_argument("--track", help="Track the used reference sequences and store them together with the "
-                                        "generated fasta files (Optional). Will not store anything if no reference "
-                                        "sequence is used eventually",
-                        action="store_true")
-
-    parsed_args = parser.parse_args()
-
-    length = parsed_args.length
-    number = parsed_args.number
-    batch = parsed_args.batch
-    processors = parsed_args.processors
-    output_dir_path = parsed_args.output
-    ref_lib = parsed_args.reference
-    ref_lib_weight = parsed_args.weight
-    num_segment = parsed_args.segment
-    random_ratio = parsed_args.ratio
-    # flag_verbose = parsed_args.verbose
-    flag_filter_n = parsed_args.filter_n
-    flag_track = parsed_args.track
-
-    # SeqGenerator_instance = SeqGenerator(length=length, number=number, batch=batch, processors=processors,
-    #                                      output_dir=output_dir_path, ref_lib=ref_lib, ref_lib_weight=ref_lib_weight,
-    #                                      num_segment=num_segment, random_ratio=random_ratio,
-    #                                      flag_verbose=flag_verbose, flag_filter_n=flag_filter_n, flag_track=flag_track)
-    SeqGenerator_instance = SeqGenerator(length=length, number=number, batch=batch, processors=processors,
-                                         output_dir=output_dir_path, ref_lib=ref_lib, ref_lib_weight=ref_lib_weight,
-                                         num_segment=num_segment, random_ratio=random_ratio,
-                                         flag_filter_n=flag_filter_n, flag_track=flag_track)
-
-    SeqGenerator_instance.execute()
+    try:
+        generator = SeqGenerator(
+            input_file=args.input,
+            insertion=args.insertion,
+            iteration=args.iteration,
+            batch=args.batch,
+            processors=args.processors,
+            output_dir=args.output,
+            ref_lib=args.ref,
+            ref_lib_weight=args.weight,
+            flag_verbose=args.verbose,
+            flag_filter_n=args.filter_n,
+            flag_track=args.track
+        )
+        generator.execute()
+    except Exception as e:
+        raise SystemExit(f"ERROR: {str(e)}")
 
 if __name__ == "__main__":
     main()
