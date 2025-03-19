@@ -18,6 +18,7 @@ import multiprocessing as mp
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
+from h5py import ref_dtype
 
 VERSION = "v0.1.0"
 INFO = ("by Tianyu (Sky) Lu (tlu83@wisc.edu)\n"
@@ -307,15 +308,15 @@ def _find_ref_lib_abs_path_list(path: str) -> Optional[List[str]]:
     raise SystemExit(f"ERROR: Specified reference library not found at {path} or built-in reference library!")
 
 
-def _load_multiple_ref_libs(ref_lib_path_list: List[str], ref_lib_weight_list: Optional[List[float]] = None,
+def _load_multiple_ref_libs(path_list: List[str], weight_list: Optional[List[float]] = None,
                             len_limit: Optional[int] = None,
                             flag_filter_n: bool = False) -> Optional[Tuple[List[str], List[int], List[float]]]:
     """
     Load multiple reference libraries by combining their sequences.
 
     Args:
-        ref_lib_path_list (List[str]): List of paths to reference libraries
-        ref_lib_weight_list (Optional[List[float]]): List of weights for each reference library
+        path_list (List[str]): List of paths to reference libraries
+        weight_list (Optional[List[float]]): List of weights for each reference library
         len_limit (Optional[int]): Maximum length limit for sequences to load
         flag_filter_n (bool): Flag to filter out sequences containing N
 
@@ -325,16 +326,16 @@ def _load_multiple_ref_libs(ref_lib_path_list: List[str], ref_lib_weight_list: O
             - List[int]: List of lengths of reference sequences
             - List[float]: List of weights for each reference sequence
     """
-    if not ref_lib_path_list:
+    if not path_list:
         return None
 
     all_ref_sequence_list: List[str] = []
     all_ref_len_list: List[int] = []
     all_ref_weight_list: List[float] = []
 
-    weight_list: Union[List[float], List[None]] = ref_lib_weight_list or [None] * len(ref_lib_path_list)
+    weight_list: Union[List[float], List[None]] = weight_list or [None] * len(path_list)
 
-    for path_list, weight in zip(ref_lib_path_list, weight_list):
+    for path_list, weight in zip(path_list, weight_list):
         single_ref_lib_abs_path_list = _find_ref_lib_abs_path_list(path_list)
         if single_ref_lib_abs_path_list:
             single_ref_lib_sequences = load_sequences(single_ref_lib_abs_path_list, len_limit, flag_filter_n)
@@ -358,7 +359,7 @@ class SeqGenerator:
 
     def __init__(self, input_file: str, insertion: int, iteration: int, batch: int, processors: int, output_dir: str,
                  ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
-                 flag_verbose: bool = False, flag_filter_n: bool = False, flag_track: bool = False):
+                 ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False):
         """
         Initialize the sequence generator.
 
@@ -371,7 +372,7 @@ class SeqGenerator:
             output_dir (str): Directory to save output files
             ref_lib (List[str], optional): List of reference library file paths
             ref_lib_weight (List[float], optional): Weights for reference libraries
-            flag_verbose (bool): Whether to print verbose output
+            ref_len_limit (int, optional): Maximum length limit for reference sequences to load
             flag_filter_n (bool): Whether to filter out sequences containing N
             flag_track (bool): Whether to track reference sequences used
         """
@@ -381,21 +382,22 @@ class SeqGenerator:
         self.batch = batch
         self.processors = processors
         self.output_dir = output_dir
-        self.flag_verbose = flag_verbose
+        # self.flag_verbose = flag_verbose
+        self.ref_len_limit = ref_len_limit
         self.flag_filter_n = flag_filter_n
         self.flag_track = flag_track
 
         # Load input sequence
         try:
-            self.input_sequences = list(SeqIO.parse(input_file, "fasta"))
-            if not self.input_sequences:
-                raise SystemExit(f"ERROR: No sequences found in input file {input_file}")
+            self.input = list(SeqIO.parse(input_file, "fasta"))
+            if not self.input:
+                raise SystemExit(f"[ERROR] No sequences found in input file {input_file}")
         except Exception as e:
-            raise SystemExit(f"ERROR: Failed to load input file {input_file}: {str(e)}")
+            raise SystemExit(f"[ERROR] Failed to load input file {input_file}: {str(e)}")
 
         # Load reference sequences
         if ref_lib:
-            ref_lib_data = _load_multiple_ref_libs(ref_lib, ref_lib_weight, None, flag_filter_n)
+            ref_lib_data = _load_multiple_ref_libs(ref_lib, ref_lib_weight, ref_len_limit, flag_filter_n)
             if ref_lib_data:
                 self.ref_sequences, _, self.ref_weights = ref_lib_data
             else:
@@ -467,14 +469,14 @@ class SeqGenerator:
             Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: The processed sequences and used references if tracking
         """
         start_idx = batch_num * self.batch
-        end_idx = min(start_idx + self.batch, len(self.input_sequences))
+        end_idx = min(start_idx + self.batch, len(self.input))
         
         processed_seqs = []
         all_used_refs = [] if self.flag_track else None
         
-        for i, seq_record in enumerate(self.input_sequences[start_idx:end_idx], start=start_idx):
+        for i, seq_record in enumerate(self.input[start_idx:end_idx], start=start_idx):
             if self.flag_verbose:
-                print(f"Processing sequence {i + 1}/{len(self.input_sequences)}")
+                print(f"Processing sequence {i + 1}/{len(self.input)}")
             
             processed_seq, used_refs = self._process_single_sequence(seq_record, i + 1)
             processed_seqs.append(processed_seq)
@@ -490,7 +492,7 @@ class SeqGenerator:
         """
         self._pre_check()
         
-        total_batches = (len(self.input_sequences) + self.batch - 1) // self.batch
+        total_batches = (len(self.input) + self.batch - 1) // self.batch
         
         if self.processors > 1 and total_batches > 1:
             with mp.Pool(self.processors) as pool:
@@ -516,14 +518,19 @@ class SeqGenerator:
 
 def main():
     """Main function to handle command line arguments and execute the program."""
-    parser = argparse.ArgumentParser(description=f"Random DNA Sequence Generator with Insertion {VERSION}\n{INFO}",
-                                   formatter_class=argparse.RawDescriptionHelpFormatter)
-    
+    parser = argparse.ArgumentParser(prog="RandomSequenceInsertion",
+                                     description="RandSeqInsert is a high-performance Python tool for "
+                                                 "randomly inserting genomic fragments into sequences")
+    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}\n{INFO}")
+
+    # TODO
+    # 1. revise help information
+
     # Required arguments
-    parser.add_argument("-i", "--input", required=True,
-                       help="Input sequence file in FASTA format")
-    parser.add_argument("-s", "--insertion", type=int, required=True,
-                       help="Number of insertions per sequence")
+    parser.add_argument("-i", "--input", help="Input sequence file in FASTA format",
+                        type=str, required=True)
+    parser.add_argument("-s", "--insertion", help="Number of insertions per sequence",
+                        type=int, required=True)
     parser.add_argument("--iteration", type=int, required=True,
                        help="Number of times to iterate the insertion process")
     
@@ -534,35 +541,48 @@ def main():
                        help="Number of processors to use")
     parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_REL_PATH,
                        help="Output directory path")
-    parser.add_argument("-r", "--ref", nargs="+",
+    parser.add_argument("-r", "--reference", nargs="+",
                        help="Reference sequence library file paths")
     parser.add_argument("-w", "--weight", type=float, nargs="+",
                        help="Weights for reference libraries")
-    parser.add_argument("--verbose", action="store_true",
-                       help="Print verbose output")
+    parser.add_argument("-l", "--ref_len_limit", help="Weights for reference libraries", type=int,
+                        default=None)
+
+    # Optional arguments - flags
+    # parser.add_argument("--verbose", action="store_true",
+    #                    help="Print verbose output")
     parser.add_argument("--filter-n", action="store_true",
                        help="Filter out sequences containing N")
     parser.add_argument("--track", action="store_true", help="Track and save used reference sequences")
 
-    args = parser.parse_args()
+    parsed_args = parser.parse_args()
 
-    try:
-        generator = SeqGenerator(
-            input_file=args.input,
-            insertion=args.insertion,
-            iteration=args.iteration,
-            batch=args.batch,
-            processors=args.processors,
-            output_dir=args.output,
-            ref_lib=args.ref,
-            ref_lib_weight=args.weight,
-            flag_verbose=args.verbose,
-            flag_filter_n=args.filter_n,
-            flag_track=args.track
-        )
-        generator.execute()
-    except Exception as e:
-        raise SystemExit(f"ERROR: {str(e)}")
+    input_file = parsed_args.input
+    insertion = parsed_args.insertion
+    iteration = parsed_args.iteration
+    batch = parsed_args.batch
+    processors = parsed_args.processors
+    output_dir_path = parsed_args.output
+    ref_lib = parsed_args.reference
+    ref_lib_weight = parsed_args.weight
+    ref_len_limit = parsed_args.len_limit
+    flag_filter_n = parsed_args.filter_n
+    flag_track = parsed_args.track
+
+    generator = SeqGenerator(
+        input_file=input_file,
+        insertion=insertion,
+        iteration=iteration,
+        batch=batch,
+        processors=processors,
+        output_dir=output_dir_path,
+        ref_lib=ref_lib,
+        ref_lib_weight=ref_lib_weight,
+        ref_len_limit=ref_len_limit,
+        flag_filter_n=flag_filter_n,
+        flag_track=flag_track
+    )
+    generator.execute()
 
 if __name__ == "__main__":
     main()

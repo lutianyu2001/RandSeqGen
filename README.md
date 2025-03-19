@@ -28,7 +28,7 @@ RandSeqGen is a high-performance Python tool for generating random DNA sequences
 ## Usage
 
 ```bash
-python RandSeqGen.py [-h] [-v] -l LENGTH [-n NUMBER] [-b BATCH] [-p PROCESSOR] [-o OUTPUT] [-r REFERENCE] [--ratio RATIO] [--verbose]
+python RandSeqInsert.py [-h] [-v] -l LENGTH [-n NUMBER] [-b BATCH] [-p PROCESSOR] [-o OUTPUT] [-r REFERENCE] [--ratio RATIO] [--verbose]
 ```
 
 ### Program Information
@@ -78,7 +78,7 @@ python RandSeqGen.py [-h] [-v] -l LENGTH [-n NUMBER] [-b BATCH] [-p PROCESSOR] [
 
 ```sh
 # Generate 100 sequences of 1kb each in 2 batches
-python RandSeqGen.py -l 1kb -n 100 -b 2
+python RandSeqInsert.py -l 1kb -n 100 -b 2
 ```
 
 ### Generate Reference-Based Sequences
@@ -86,21 +86,21 @@ python RandSeqGen.py -l 1kb -n 100 -b 2
 #### Function Test
 
 ```sh
-python RandSeqGen.py -l 10kb -n 100 -b 2 -r lib/test -w 0.8 -r lib/TIR/maize -w 0.2 --track
+python RandSeqInsert.py -l 10kb -n 100 -b 2 -r lib/test -w 0.8 -r lib/TIR/maize -w 0.2 --track
 ```
 
 #### Based on One Reference Library (TIR/maize)
 
 ```sh
 # Generate sequences using built-in maize TIR reference library with 20% random bases
-python RandSeqGen.py -l 10kb -n 100 -b 2 -r lib/TIR/maize
+python RandSeqInsert.py -l 10kb -n 100 -b 2 -r lib/TIR/maize
 ```
 
 #### Based on Multiple Reference Library (TIR/maize and TIR/rice)
 
 ```sh
 # Generate sequences using built-in maize and rice TIR reference libraries with 20% random bases, filter out reference sequences containing N
-python RandSeqGen.py -l 10kb -n 100 -b 2 -r lib/TIR/maize -r lib/TIR/rice --filter_n
+python RandSeqInsert.py -l 10kb -n 100 -b 2 -r lib/TIR/maize -r lib/TIR/rice --filter_n
 ```
 
 
