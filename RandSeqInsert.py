@@ -75,7 +75,7 @@ def process_length(length_str: str) -> int:
     if length_str.isdigit() or length_str.endswith("b"):
         return int(length_str.replace('b', ''))
 
-    raise SystemExit("ERROR: Invalid length format. Use number, kb or mb (e.g. 100, 1kb, 1mb)")
+    raise SystemExit("[ERROR] Invalid length format. Use number, kb or mb (e.g. 100, 1kb, 1mb)")
 
 
 def sort_multiple_lists(base: list, *lists: list, 
@@ -94,7 +94,7 @@ def sort_multiple_lists(base: list, *lists: list,
         the rest are the sorted lists in the same order as they were passed in.
     """
     if not base:
-        raise ValueError("ERROR: Base list cannot be empty.")
+        raise ValueError("[ERROR] Base list cannot be empty.")
     if not lists:
         return sorted(base, key=key, reverse=reverse)
 
@@ -103,7 +103,7 @@ def sort_multiple_lists(base: list, *lists: list,
     base_len = len(base)
     len_set = set(len(l) for l in all_lists)
     if len(len_set) != 1 and not (len(len_set) == 2 and 0 in len_set):
-        raise ValueError("ERROR: All non-empty lists must have the same length as the base list.")
+        raise ValueError("[ERROR] All non-empty lists must have the same length as the base list.")
 
     # Generate sorting indices
     if key is None:
@@ -305,7 +305,7 @@ def _find_ref_lib_abs_path_list(path: str) -> Optional[List[str]]:
             if ref_lib_files:
                 return ref_lib_files
 
-    raise SystemExit(f"ERROR: Specified reference library not found at {path} or built-in reference library!")
+    raise SystemExit(f"[ERROR] Specified reference library not found at {path} or built-in reference library!")
 
 
 def _load_multiple_ref_libs(path_list: List[str], weight_list: Optional[List[float]] = None,
@@ -401,9 +401,9 @@ class SeqGenerator:
             if ref_lib_data:
                 self.ref_sequences, _, self.ref_weights = ref_lib_data
             else:
-                raise SystemExit("ERROR: No valid reference sequences loaded")
+                raise SystemExit("[ERROR] No valid reference sequences loaded")
         else:
-            raise SystemExit("ERROR: Reference library is required for insertion")
+            raise SystemExit("[ERROR] Reference library is required for insertion")
 
     def _pre_check(self):
         """
