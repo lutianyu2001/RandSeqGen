@@ -44,7 +44,7 @@ python RandSeqInsert.py [-h] [-v] -i INPUT -ins INSERTION [-it ITERATION] [-b BA
 
 - `-i, --input`
   - Path to input sequence file
-- `-ins, --insertion`
+- `-is, --insertion`
   - Number of insertions to perform in each sequence
 
 ### Optional Arguments
@@ -86,7 +86,7 @@ python RandSeqInsert.py [-h] [-v] -i INPUT -ins INSERTION [-it ITERATION] [-b BA
 
 ```sh
 # Insert 10 references from the built-in TIR/maize library into sequences in input.fa
-python RandSeqInsert.py -i input.fa -ins 10 -r lib/TIR/maize
+python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize
 ```
 
 ### Advanced Examples
@@ -95,44 +95,44 @@ python RandSeqInsert.py -i input.fa -ins 10 -r lib/TIR/maize
 
 ```sh
 # Insert 10 references per sequence using two libraries with different weights
-python RandSeqInsert.py -i input.fa -ins 10 -r lib/TIR/maize -w 0.8 -r lib/TIR/rice -w 0.2
+python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize -w 0.8 -r lib/TIR/rice -w 0.2
 ```
 
 #### Multiple Iterations
 
 ```sh
 # Process each sequence 3 times with 10 insertions each time
-python RandSeqInsert.py -i input.fa -ins 10 -it 3 -r lib/TIR/maize
+python RandSeqInsert.py -i input.fa -is 10 -it 3 -r lib/TIR/maize
 ```
 
 #### Track References
 
 ```sh
 # Enable tracking of inserted references
-python RandSeqInsert.py -i input.fa -ins 10 -r lib/TIR/maize --track
+python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize --track
 ```
 
 #### Filter References with N
 
 ```sh
 # Filter out reference sequences containing N
-python RandSeqInsert.py -i input.fa -ins 10 -r lib/TIR/maize --filter_n
+python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize --filter_n
 ```
 
 #### Multiple Batches with Multi-processing
 
 ```sh
 # Process in 5 batches using 8 processor cores
-python RandSeqInsert.py -i input.fa -ins 10 -b 5 -p 8 -r lib/TIR/maize
+python RandSeqInsert.py -i input.fa -is 10 -b 5 -p 8 -r lib/TIR/maize
 ```
 
 #### Comprehensive Example
 
 ```sh
 # Complex example with multiple libraries, tracking, and verbose output
-python RandSeqInsert.py -i input.fa -ins 20 -it 2 -b 3 -p 12 -o custom_output \
+python RandSeqInsert.py -i input.fa -is 20 -it 2 -b 3 -p 12 -o custom_output \
   -r lib/TIR/maize -w 0.6 -r lib/TIR/rice -w 0.4 \
-  --track --filter_n --verbose
+  --track --filter_n
 ```
 
 ## Output Format

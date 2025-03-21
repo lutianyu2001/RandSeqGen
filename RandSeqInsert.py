@@ -744,10 +744,10 @@ def main():
 
     # Core parameters
     core_group = parser.add_argument_group("Core Parameters")
-    core_group.add_argument("-s", "--insertion", metavar="INT",
+    core_group.add_argument("-is", "--insertion", metavar="INT",
                        help="Number of insertions per sequence. Specifies how many reference sequence fragments to insert into each input sequence per iteration.",
                        type=int, required=True)
-    core_group.add_argument("--iteration", metavar="INT", type=int, required=True,
+    core_group.add_argument("-it", "--iteration", metavar="INT", type=int, required=True,
                        help="Number of times to iterate the insertion process. Each iteration builds upon the results of the previous one.")
     
     # Reference library parameters
@@ -766,7 +766,7 @@ def main():
     other_group.add_argument("-b", "--batch", type=int, default=1, metavar="INT",
                        help="Number of independent result files to generate. Runs the entire process multiple times with different random seeds to generate multiple output sets. Default: 1")
     other_group.add_argument("-p", "--processors", type=int, default=DEFAULT_ALLOCATED_CPU_CORES, metavar="INT",
-                       help=f"Number of processors to use for parallel processing. Default: system CPU cores - 2 (currently {DEFAULT_ALLOCATED_CPU_CORES})")
+                       help=f"Number of processors to use for parallel processing. Default: {DEFAULT_ALLOCATED_CPU_CORES}")
     other_group.add_argument("--track", action="store_true", 
                        help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
 
