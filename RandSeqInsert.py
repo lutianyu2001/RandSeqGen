@@ -221,9 +221,7 @@ def _load_multiple_ref_libs(path_list: List[str], weight_list: Optional[List[flo
     all_ref_len_list: List[int] = []
     all_ref_weight_list: List[float] = []
 
-    weight_list: Union[List[float], List[None]] = weight_list or [None] * len(path_list)
-
-    for path_list, weight in zip(path_list, weight_list):
+    for path_list, weight in zip(path_list, weight_list or [None] * len(path_list)):
         single_ref_lib_abs_path_list = _find_ref_lib_abs_path_list(path_list)
         if single_ref_lib_abs_path_list:
             single_ref_lib_sequences = load_sequences(single_ref_lib_abs_path_list, len_limit, flag_filter_n)
@@ -581,7 +579,7 @@ class SeqGenerator:
                 all_sequences.extend(seqs)
                 if self.flag_track and refs:
                     all_refs.extend(refs)
-                print(f"Completed chunk {i}/{num_chunks} ({i/num_chunks*100:.1f}%)")
+                print(f"Completed chunk {i}/{num_chunks}")
         
         return all_sequences, all_refs
 
@@ -606,7 +604,7 @@ class SeqGenerator:
                 all_refs.extend(refs)
             
             if (i + 1) % 10 == 0 or i + 1 == total_sequences:
-                print(f"Processed {i+1}/{total_sequences} sequences ({(i+1)/total_sequences*100:.1f}%)")
+                print(f"Processed {i+1}/{total_sequences} sequences")
         
         return all_sequences, all_refs
 
@@ -643,7 +641,7 @@ class SeqGenerator:
         self.__save_batch_results(self.output_dir, all_sequences, all_refs, batch_num)
         
         batch_elapsed_time = time.time() - batch_start_time
-        print(f"Batch {batch_num} completed in {batch_elapsed_time:.2f} seconds")
+        print(f"Batch {batch_num} completed in {batch_elapsed_time:.2g} seconds")
         
         return batch_elapsed_time
 
@@ -686,7 +684,7 @@ class SeqGenerator:
         Args:
             total_elapsed_time (float): Total time taken for all batches
         """
-        print(f"\nAll batches completed in {total_elapsed_time:.2f} seconds")
+        print(f"\nAll batches completed in {total_elapsed_time:.2g} seconds")
         
         if self.batch > 1:
             print(f"Results saved to {os.path.abspath(self.output_dir)} with filenames sequences_batch[1-{self.batch}].fasta")

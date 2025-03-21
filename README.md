@@ -84,6 +84,13 @@ python RandSeqInsert.py [-h] [-v] -i INPUT -ins INSERTION [-it ITERATION] [-b BA
 python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize
 ```
 
+#### Track References
+
+```sh
+# Enable tracking of inserted references
+python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize --track
+```
+
 ### Advanced Examples
 
 #### Multiple Reference Libraries with Weights
@@ -98,13 +105,6 @@ python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize -w 0.8 -r lib/TIR/ri
 ```sh
 # Process each sequence 3 times with 10 insertions each time
 python RandSeqInsert.py -i input.fa -is 10 -it 3 -r lib/TIR/maize
-```
-
-#### Track References
-
-```sh
-# Enable tracking of inserted references
-python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize --track
 ```
 
 #### Filter References with N
