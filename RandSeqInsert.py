@@ -734,40 +734,38 @@ def main():
 
     # TODO Revise the help information
 
-    # Required arguments
-    input_group = parser.add_argument_group("Required Input/Output Arguments")
-    input_group.add_argument("-i", "--input", 
+    # Required Arguments
+    required_group = parser.add_argument_group("Required Arguments")
+    required_group.add_argument("-i", "--input",
                        help="Input sequence file in FASTA format. Contains the target sequences to be inserted into.",
                        type=str, required=True, metavar="FILE")
-    input_group.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_REL_PATH, metavar="DIR",
+    required_group.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_REL_PATH, metavar="DIR",
                        help=f"Output directory path. Generated sequences and related files will be saved here. Default: '{DEFAULT_OUTPUT_DIR_REL_PATH}'")
 
-    # Core parameters
-    core_group = parser.add_argument_group("Core Parameters")
-    core_group.add_argument("-is", "--insertion", metavar="INT",
+    required_group.add_argument("-is", "--insertion", metavar="INT",
                        help="Number of insertions per sequence. Specifies how many reference sequence fragments to insert into each input sequence per iteration.",
                        type=int, required=True)
-    core_group.add_argument("-it", "--iteration", metavar="INT", type=int, required=True,
+    required_group.add_argument("-it", "--iteration", metavar="INT", type=int, required=True,
                        help="Number of times to iterate the insertion process. Each iteration builds upon the results of the previous one.")
-    
-    # Reference library parameters
-    ref_group = parser.add_argument_group("Reference Library Parameters")
-    ref_group.add_argument("-r", "--reference", nargs="+", metavar="FILE/DIR",
-                       help="Reference sequence library file or directory paths. Multiple FASTA format reference files can be specified. Sequences from these files will be used as insertion fragments.")
-    ref_group.add_argument("-w", "--weight", type=float, nargs="+", metavar="FLOAT",
-                       help="Weights for reference libraries. Controls the probability of selecting sequences from different reference libraries. The number of weights should match the number of reference libraries.")
-    ref_group.add_argument("-l", "--ref-len-limit", type=int, default=None, metavar="INT",
-                       help="Reference sequence length limit. Only loads reference sequences with length less than or equal to this value. Default: no limit.")
-    ref_group.add_argument("--filter-n", action="store_true",
-                       help="Filter out sequences containing N. Enable this option to exclude reference sequences containing N bases.")
 
-    # Other parameters
-    other_group = parser.add_argument_group("Other Parameters")
-    other_group.add_argument("-b", "--batch", type=int, default=1, metavar="INT",
+    required_group.add_argument("-r", "--reference", nargs="+", metavar="FILE/DIR", required=True,
+                       help="Reference sequence library file or directory paths. Multiple FASTA format reference files can be specified. Sequences from these files will be used as insertion fragments.")
+
+    # Optional Arguments
+    optional_group = parser.add_argument_group("Optional Arguments")
+    optional_group.add_argument("-w", "--weight", type=float, nargs="+", metavar="FLOAT",
+                       help="Weights for reference libraries. Controls the probability of selecting sequences from different reference libraries. The number of weights should match the number of reference libraries.")
+    optional_group.add_argument("-l", "--limit", type=int, default=None, metavar="INT",
+                       help="Reference sequence length limit. Only loads reference sequences with length less than or equal to this value. Default: no limit.")
+
+    optional_group.add_argument("-b", "--batch", type=int, default=1, metavar="INT",
                        help="Number of independent result files to generate. Runs the entire process multiple times with different random seeds to generate multiple output sets. Default: 1")
-    other_group.add_argument("-p", "--processors", type=int, default=DEFAULT_ALLOCATED_CPU_CORES, metavar="INT",
+    optional_group.add_argument("-p", "--processors", type=int, default=DEFAULT_ALLOCATED_CPU_CORES, metavar="INT",
                        help=f"Number of processors to use for parallel processing. Default: {DEFAULT_ALLOCATED_CPU_CORES}")
-    other_group.add_argument("--track", action="store_true", 
+
+    optional_group.add_argument("--filter_n", action="store_true",
+                                help="Filter out sequences containing N. Enable this option to exclude reference sequences containing N bases.")
+    optional_group.add_argument("--track", action="store_true",
                        help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
 
     parsed_args = parser.parse_args()
@@ -780,7 +778,7 @@ def main():
     output_dir_path = parsed_args.output
     ref_lib = parsed_args.reference
     ref_lib_weight = parsed_args.weight
-    ref_len_limit = parsed_args.ref_len_limit
+    ref_len_limit = parsed_args.limit
     flag_filter_n = parsed_args.filter_n
     flag_track = parsed_args.track
 
