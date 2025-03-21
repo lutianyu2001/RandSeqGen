@@ -272,9 +272,8 @@ class SequenceNode:
         left_length = self.left.total_length if self.left else 0
         right_length = self.right.total_length if self.right else 0
         self.total_length = left_length + self.length + right_length
-        return self.total_length
     
-    def insert_at_position(self, abs_position: int, ref_seq: str, ref_metadata) -> 'SequenceNode':
+    def insert(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
         """
         Insert a reference sequence at the absolute position in the tree.
         
@@ -292,7 +291,7 @@ class SequenceNode:
         # Fast path: Position is before this node
         if abs_position <= left_length:
             if self.left:
-                self.left = self.left.insert_at_position(abs_position, ref_seq, ref_metadata)
+                self.left = self.left.insert(abs_position, ref_seq, ref_metadata)
             else:
                 # Insert as left child
                 self.left = SequenceNode(ref_seq, True, ref_metadata)
@@ -338,7 +337,7 @@ class SequenceNode:
         # Fast path: Position is after this node
         if abs_position >= node_end:
             if self.right:
-                self.right = self.right.insert_at_position(abs_position - node_end, ref_seq, ref_metadata)
+                self.right = self.right.insert(abs_position - node_end, ref_seq, ref_metadata)
             else:
                 # Insert as right child
                 self.right = SequenceNode(ref_seq, True, ref_metadata)
@@ -500,7 +499,7 @@ class SeqGenerator:
             # Insert references directly into the tree in optimal order
             for pos, ref_seq in zip(insert_positions, selected_refs):
                 metadata = {'iteration': i + 1, 'rel_pos': pos}
-                root = root.insert_at_position(pos, ref_seq, metadata)
+                root = root.insert(pos, ref_seq, metadata)
         
         # Generate the final sequence string and create sequence record
         final_seq = str(root)
@@ -726,46 +725,49 @@ class SeqGenerator:
 def main():
     """Main function to handle command line arguments and execute the program."""
     parser = argparse.ArgumentParser(prog="RandSeqInsert",
-                                     description="RandSeqInsert: A high-performance Python tool for randomly inserting "
+                                     description="RandomSequenceInsertion: A high-performance Python tool for randomly inserting "
                                                "genomic fragments from reference libraries into target sequences. "
                                                "It supports multiprocessing for efficient processing of large datasets.",
-                                     epilog=f"Version: {VERSION}\n{INFO}")
+                                     epilog="")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}\n{INFO}")
 
     # TODO Revise the help information
 
-    # Required Arguments
-    required_group = parser.add_argument_group("Required Arguments")
-    required_group.add_argument("-i", "--input",
+    # Core Arguments
+    core_group = parser.add_argument_group("Core Arguments")
+    core_group.add_argument("-i", "--input",
                        help="Input sequence file in FASTA format. Contains the target sequences to be inserted into.",
                        type=str, required=True, metavar="FILE")
-    required_group.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_REL_PATH, metavar="DIR",
+    core_group.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_REL_PATH, metavar="DIR",
                        help=f"Output directory path. Generated sequences and related files will be saved here. Default: '{DEFAULT_OUTPUT_DIR_REL_PATH}'")
 
-    required_group.add_argument("-is", "--insertion", metavar="INT",
+    core_group.add_argument("-is", "--insertion", metavar="INT",
                        help="Number of insertions per sequence. Specifies how many reference sequence fragments to insert into each input sequence per iteration.",
                        type=int, required=True)
-    required_group.add_argument("-it", "--iteration", metavar="INT", type=int, required=True,
+    core_group.add_argument("-it", "--iteration", metavar="INT", type=int, default=1,
                        help="Number of times to iterate the insertion process. Each iteration builds upon the results of the previous one.")
 
-    required_group.add_argument("-r", "--reference", nargs="+", metavar="FILE/DIR", required=True,
-                       help="Reference sequence library file or directory paths. Multiple FASTA format reference files can be specified. Sequences from these files will be used as insertion fragments.")
-
-    # Optional Arguments
-    optional_group = parser.add_argument_group("Optional Arguments")
-    optional_group.add_argument("-w", "--weight", type=float, nargs="+", metavar="FLOAT",
+    # Reference Library Arguments
+    ref_group = parser.add_argument_group("Reference Library Arguments")
+    ref_group.add_argument("-r", "--reference", nargs="+", metavar="FILE/DIR", required=True,
+                            help="Reference sequence library file or directory paths. Multiple FASTA format reference files can be specified. Sequences from these files will be used as insertion fragments.")
+    ref_group.add_argument("-w", "--weight", type=float, nargs="+", metavar="FLOAT",
                        help="Weights for reference libraries. Controls the probability of selecting sequences from different reference libraries. The number of weights should match the number of reference libraries.")
-    optional_group.add_argument("-l", "--limit", type=int, default=None, metavar="INT",
+    ref_group.add_argument("-l", "--limit", type=int, default=None, metavar="INT",
                        help="Reference sequence length limit. Only loads reference sequences with length less than or equal to this value. Default: no limit.")
 
-    optional_group.add_argument("-b", "--batch", type=int, default=1, metavar="INT",
-                       help="Number of independent result files to generate. Runs the entire process multiple times with different random seeds to generate multiple output sets. Default: 1")
-    optional_group.add_argument("-p", "--processors", type=int, default=DEFAULT_ALLOCATED_CPU_CORES, metavar="INT",
+    # Control Arguments
+    ctrl_group = parser.add_argument_group("Control Arguments")
+    ctrl_group.add_argument("-b", "--batch", type=int, default=1, metavar="INT",
+                            help="Number of independent result files to generate. Runs the entire process multiple times with different random seeds to generate multiple output sets. Default: 1")
+    ctrl_group.add_argument("-p", "--processors", type=int, default=DEFAULT_ALLOCATED_CPU_CORES, metavar="INT",
                        help=f"Number of processors to use for parallel processing. Default: {DEFAULT_ALLOCATED_CPU_CORES}")
 
-    optional_group.add_argument("--filter_n", action="store_true",
+    # Flags
+    flag_group = parser.add_argument_group("Flags")
+    flag_group.add_argument("--filter_n", action="store_true",
                                 help="Filter out sequences containing N. Enable this option to exclude reference sequences containing N bases.")
-    optional_group.add_argument("--track", action="store_true",
+    flag_group.add_argument("--track", action="store_true",
                        help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
 
     parsed_args = parser.parse_args()

@@ -40,14 +40,12 @@ python RandSeqInsert.py [-h] [-v] -i INPUT -ins INSERTION [-it ITERATION] [-b BA
 - `-v, --version`
   - Show version information and exit
 
-### Required Arguments
+### Arguments
 
 - `-i, --input`
   - Path to input sequence file
 - `-is, --insertion`
   - Number of insertions to perform in each sequence
-
-### Optional Arguments
 
 - `-it, --iteration` (default: 1)
   - Number of iterations to process each sequence
@@ -76,9 +74,6 @@ python RandSeqInsert.py [-h] [-v] -i INPUT -ins INSERTION [-it ITERATION] [-b BA
 
 - `--filter_n`
   - Avoid using reference sequences with N
-
-- `--verbose`
-  - Enable detailed progress output
 
 ## Examples
 
