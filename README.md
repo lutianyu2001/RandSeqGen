@@ -1,8 +1,8 @@
-# RandSeqGen
+# RandSeqInsert
 
-[![license](https://img.shields.io/github/license/lutianyu2001/RandSeqGen.svg)](https://github.com/lutianyu2001/RandSeqGen/blob/master/LICENSE)
+[![license](https://img.shields.io/github/license/lutianyu2001/RandSeqInsert.svg)](https://github.com/lutianyu2001/RandSeqInsert/blob/master/LICENSE)
 
-RandSeqGen is a high-performance Python tool for generating random DNA sequences. It supports both purely random sequence generation and reference-based sequence generation with customizable random base insertion.
+RandSeqInsert is a high-performance Python tool for inserting random DNA segments from reference libraries into existing sequences. It allows for customizable insertion of references with precise control over insertion parameters.
 
 ## Table of Contents
 
@@ -17,9 +17,11 @@ RandSeqGen is a high-performance Python tool for generating random DNA sequences
 
 ## Features
 
-- Generate purely random DNA sequences or combine reference sequences with random bases
-- Multi-processing support for efficient sequence generation
+- Insert reference sequences from libraries into existing DNA sequences
+- Control insertion frequency and distribution
+- Multi-processing support for efficient sequence processing
 - Support for various sequence length formats (number, kb, mb)
+- Tracking of inserted references (optional)
 
 ## Prerequisites
 - Python >=3.8
@@ -28,7 +30,7 @@ RandSeqGen is a high-performance Python tool for generating random DNA sequences
 ## Usage
 
 ```bash
-python RandSeqInsert.py [-h] [-v] -l LENGTH [-n NUMBER] [-b BATCH] [-p PROCESSOR] [-o OUTPUT] [-r REFERENCE] [--ratio RATIO] [--verbose]
+python RandSeqInsert.py [-h] [-v] -i INPUT -ins INSERTION [-it ITERATION] [-b BATCH] [-p PROCESSOR] [-o OUTPUT] [-r REFERENCE] [-w WEIGHT] [--track] [--filter_n] [--verbose]
 ```
 
 ### Program Information
@@ -40,99 +42,130 @@ python RandSeqInsert.py [-h] [-v] -l LENGTH [-n NUMBER] [-b BATCH] [-p PROCESSOR
 
 ### Required Arguments
 
-- `-l, --length`
-  - Length of each sequence (e.g., 100, 1kb, 1mb)
+- `-i, --input`
+  - Path to input sequence file
+- `-ins, --insertion`
+  - Number of insertions to perform in each sequence
 
 ### Optional Arguments
 
-- `-n, --number` (default: 1)
-  - Number of sequences in each file
+- `-it, --iteration` (default: 1)
+  - Number of iterations to process each sequence
 
 - `-b, --batch` (default: 1)
-  - Number of generated FASTA files
+  - Number of batches to process
 
 - `-p, --processor` (default: available cores - 2)
   - Number of processor cores to use
 
-- `-o, --output` (default: "RandSeqGen-Result")
+- `-o, --output` (default: "RandSeqInsert-Result")
   - Output directory path
 
 - `-r, --reference`
   - Path to reference library directory
-  - If not specified, the program will generate pure random sequences
+  - Can be specified multiple times for different libraries
   - Built-in reference libraries options:
     - `TIR`: Use built-in TIR reference library
 
-- `--ratio` (default: 0.2)
-  - Ratio of random bases in reference mode
+- `-w, --weight` (default: equal weights)
+  - Weight for each reference library
+  - Must match number of reference libraries
+
+- `--track`
+  - Enable tracking of inserted references
+
+- `--filter_n`
+  - Avoid using reference sequences with N
 
 - `--verbose`
   - Enable detailed progress output
 
-- `--filter_n`
-  - Avoid using reference sequence with N
-
 ## Examples
 
-### Generate Random Sequences
+### Basic Usage
 
 ```sh
-# Generate 100 sequences of 1kb each in 2 batches
-python RandSeqInsert.py -l 1kb -n 100 -b 2
+# Insert 10 references from the built-in TIR/maize library into sequences in input.fa
+python RandSeqInsert.py -i input.fa -ins 10 -r lib/TIR/maize
 ```
 
-### Generate Reference-Based Sequences
+### Advanced Examples
 
-#### Function Test
+#### Multiple Reference Libraries with Weights
 
 ```sh
-python RandSeqInsert.py -l 10kb -n 100 -b 2 -r lib/test -w 0.8 -r lib/TIR/maize -w 0.2 --track
+# Insert 10 references per sequence using two libraries with different weights
+python RandSeqInsert.py -i input.fa -ins 10 -r lib/TIR/maize -w 0.8 -r lib/TIR/rice -w 0.2
 ```
 
-#### Based on One Reference Library (TIR/maize)
+#### Multiple Iterations
 
 ```sh
-# Generate sequences using built-in maize TIR reference library with 20% random bases
-python RandSeqInsert.py -l 10kb -n 100 -b 2 -r lib/TIR/maize
+# Process each sequence 3 times with 10 insertions each time
+python RandSeqInsert.py -i input.fa -ins 10 -it 3 -r lib/TIR/maize
 ```
 
-#### Based on Multiple Reference Library (TIR/maize and TIR/rice)
+#### Track References
 
 ```sh
-# Generate sequences using built-in maize and rice TIR reference libraries with 20% random bases, filter out reference sequences containing N
-python RandSeqInsert.py -l 10kb -n 100 -b 2 -r lib/TIR/maize -r lib/TIR/rice --filter_n
+# Enable tracking of inserted references
+python RandSeqInsert.py -i input.fa -ins 10 -r lib/TIR/maize --track
 ```
 
+#### Filter References with N
+
+```sh
+# Filter out reference sequences containing N
+python RandSeqInsert.py -i input.fa -ins 10 -r lib/TIR/maize --filter_n
+```
+
+#### Multiple Batches with Multi-processing
+
+```sh
+# Process in 5 batches using 8 processor cores
+python RandSeqInsert.py -i input.fa -ins 10 -b 5 -p 8 -r lib/TIR/maize
+```
+
+#### Comprehensive Example
+
+```sh
+# Complex example with multiple libraries, tracking, and verbose output
+python RandSeqInsert.py -i input.fa -ins 20 -it 2 -b 3 -p 12 -o custom_output \
+  -r lib/TIR/maize -w 0.6 -r lib/TIR/rice -w 0.4 \
+  --track --filter_n --verbose
+```
 
 ## Output Format
 
 The program generates FASTA files in the specified output directory:
 - Format: `sequences_batch_X.fa` where X is the batch number
-- Each sequence has a unique identifier: `seq_Y_batch_X_len_Z`
-  - Y: sequence number
-  - X: batch number
-  - Z: sequence length
+- If tracking is enabled: `references_batch_X.fa` with details of inserted references
+- Each sequence retains its original ID with additional metadata
+
+### Tracking Output Format
+
+When `--track` is enabled, a separate file is generated with details about each inserted reference:
+- Position in the original sequence
+- Source reference library
+- Reference sequence ID
+- Length of the inserted reference
 
 ## Modes
 
-### Random Mode
+### Standard Mode
 
-Generates sequences using random choices from predefined 4 DNA nucleotides (A, T, G, C)
+Inserts reference sequences at random positions in the input sequences
 
-### Reference Mode
-1. Loads reference sequences from specified directory
-2. Generates random segment distribution
-3. Constructs sequences with the following steps:
-    1. Inserting reference segments at calculated positions
-    2. Filling gaps with randomly generated DNA bases
-    3. Ensuring total sequence length matches specified requirement
+### Tracking Mode
+
+Same as Standard Mode but with additional tracking of inserted references
 
 ## Performance
 
-- Parallel processing for every sequence generation and file I/O
+- Parallel processing for efficient sequence processing
 - Binary search optimization for reference sequence selection
 - Minimal disk I/O with in-memory processing
 
 ## License
 
-This project is licensed under the LGPL-2.1 License - see the [LICENSE](LICENSE) file for details.
+[TODO]
