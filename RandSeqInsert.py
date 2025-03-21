@@ -347,7 +347,7 @@ class SequenceNode:
         
         return self  # Should not reach here
     
-    def to_string(self) -> str:
+    def __str__(self) -> str:
         """
         Convert the tree to a string by in-order traversal.
         
@@ -502,7 +502,7 @@ class SeqGenerator:
                 root = root.insert_at_position(pos, ref_seq, metadata)
         
         # Generate the final sequence string and create sequence record
-        final_seq = root.to_string()
+        final_seq = str(root)
         new_id = f"{seq_record.id}_iter{self.iteration}_ins{self.insertion}"
         new_seq_record = create_sequence_record(final_seq, new_id)
         
