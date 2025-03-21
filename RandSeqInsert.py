@@ -400,7 +400,7 @@ class SequenceNode:
         if self.is_reference:
             # Create a reference record with absolute position
             start_index = current_position
-            end_index = start_index + self.length - 1
+            end_index = start_index + self.length
             ref_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
             ref_record = create_sequence_record(self.content, ref_id)
             ref_records.append(ref_record)

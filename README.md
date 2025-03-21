@@ -97,7 +97,7 @@ python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize --track
 
 ```sh
 # Insert 10 references per sequence using two libraries with different weights
-python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize -w 0.8 -r lib/TIR/rice -w 0.2
+python RandSeqInsert.py -i input.fa -is 10 -it 10 -r lib/TIR/maize -w 0.8 -r lib/TIR/rice -w 0.2 --track
 ```
 
 #### Multiple Iterations
