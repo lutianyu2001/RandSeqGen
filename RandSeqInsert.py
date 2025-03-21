@@ -372,21 +372,25 @@ class SequenceNode:
         if self.right:
             self.right.__collect_content(result)
     
-    def collect_refs(self, ref_records: list, seq_id: str, abs_position: int = 0):
+    def collect_refs(self, seq_id: str, abs_position: int = 0):
         """
         Collect reference nodes and calculate their absolute positions.
         
         Args:
-            ref_records (list): List to store reference records
             seq_id (str): ID of the original sequence
             abs_position (int): Current absolute position in the concatenated sequence
         
         Returns:
-            int: The total length of this subtree
+            Tuple[List[SeqRecord], int]: A tuple containing:
+                - List of reference records
+                - The total length of this subtree
         """
+        ref_records = []
+        
         left_length = 0
         if self.left:
-            left_length = self.left.collect_refs(ref_records, seq_id, abs_position)
+            left_refs, left_length = self.left.collect_refs(seq_id, abs_position)
+            ref_records.extend(left_refs)
         
         current_position = abs_position + left_length
         
@@ -400,9 +404,10 @@ class SequenceNode:
         
         right_length = 0
         if self.right:
-            right_length = self.right.collect_refs(ref_records, seq_id, current_position + self.length)
+            right_refs, right_length = self.right.collect_refs(seq_id, current_position + self.length)
+            ref_records.extend(right_refs)
         
-        return left_length + self.length + right_length
+        return ref_records, left_length + self.length + right_length
 
 
 class SeqGenerator:
@@ -457,15 +462,15 @@ class SeqGenerator:
         else:
             raise SystemExit("[ERROR] Reference library is required for insertion")
 
-    def _pre_check(self):
+    def __pre_check(self):
         """
         Perform pre-execution checks.
         """
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
-    def _process_single_sequence(self, seq_record: SeqRecord, seq_num: int) -> Tuple[SeqRecord, 
-                                                                                     Optional[List[SeqRecord]]]:
+    def __process_single_sequence(self, seq_record: SeqRecord, seq_num: int) -> Tuple[SeqRecord, 
+                                                                                      Optional[List[SeqRecord]]]:
         """
         Process a single sequence through all iterations using a tree-based algorithm.
         Directly navigates the tree for insertions without rebuilding it.
@@ -509,12 +514,11 @@ class SeqGenerator:
         # Only collect reference sequences if tracking is enabled
         used_refs = None
         if self.flag_track:
-            used_refs = []
-            root.collect_refs(used_refs, seq_record.id)
+            used_refs, _ = root.collect_refs(seq_record.id)
         
         return new_seq_record, used_refs
 
-    def _get_batch_output_dir(self, batch_num: int) -> str:
+    def __get_batch_output_dir(self, batch_num: int) -> str:
         """
         Get the output directory for a specific batch.
         
@@ -550,7 +554,7 @@ class SeqGenerator:
         
         for i in range(start_idx, end_idx):
             seq_record = self.input[i]
-            processed_seq, refs = self._process_single_sequence(seq_record, i + 1)
+            processed_seq, refs = self.__process_single_sequence(seq_record, i + 1)
             processed_seqs.append(processed_seq)
             
             if self.flag_track and refs:
@@ -558,7 +562,8 @@ class SeqGenerator:
         
         return processed_seqs, used_refs
 
-    def _process_batch_multiprocessing(self, total_sequences: int) -> Tuple[List[SeqRecord], Optional[List[SeqRecord]]]:
+    def __process_batch_multiprocessing(self, total_sequences: int) -> Tuple[List[SeqRecord], 
+                                                                             Optional[List[SeqRecord]]]:
         """
         Process a batch of sequences using multiprocessing.
         
@@ -593,7 +598,7 @@ class SeqGenerator:
         
         return all_sequences, all_refs
 
-    def _process_batch_single_thread(self, total_sequences: int) -> Tuple[List[SeqRecord], Optional[List[SeqRecord]]]:
+    def __process_batch_single_thread(self, total_sequences: int) -> Tuple[List[SeqRecord], Optional[List[SeqRecord]]]:
         """
         Process a batch of sequences using a single thread.
         
@@ -607,7 +612,7 @@ class SeqGenerator:
         all_refs = [] if self.flag_track else None
         
         for i, seq_record in enumerate(self.input):
-            processed_seq, refs = self._process_single_sequence(seq_record, i + 1)
+            processed_seq, refs = self.__process_single_sequence(seq_record, i + 1)
             all_sequences.append(processed_seq)
             
             if self.flag_track and refs:
@@ -618,7 +623,7 @@ class SeqGenerator:
         
         return all_sequences, all_refs
 
-    def _process_single_batch(self, batch_num: int) -> float:
+    def __process_single_batch(self, batch_num: int) -> float:
         """
         Process a single batch of sequences.
         
@@ -634,7 +639,7 @@ class SeqGenerator:
         random.seed(int(time.time()) + batch_num)
         
         # Create batch-specific output directory
-        batch_output_dir = self._get_batch_output_dir(batch_num)
+        batch_output_dir = self.__get_batch_output_dir(batch_num)
         
         # Ensure output directory exists
         if not os.path.exists(batch_output_dir):
@@ -648,19 +653,19 @@ class SeqGenerator:
         
         # Divide work based on number of processors
         if self.processors > 1 and total_sequences > 1:
-            all_sequences, all_refs = self._process_batch_multiprocessing(total_sequences)
+            all_sequences, all_refs = self.__process_batch_multiprocessing(total_sequences)
         else:
-            all_sequences, all_refs = self._process_batch_single_thread(total_sequences)
+            all_sequences, all_refs = self.__process_batch_single_thread(total_sequences)
         
         # Save results for this batch
-        self._save_batch_results(batch_output_dir, all_sequences, all_refs)
+        self.__save_batch_results(batch_output_dir, all_sequences, all_refs)
         
         batch_elapsed_time = time.time() - batch_start_time
         print(f"Batch {batch_num} completed in {batch_elapsed_time:.2f} seconds")
         
         return batch_elapsed_time
 
-    def _save_batch_results(self, output_dir: str, sequences: List[SeqRecord], references: Optional[List[SeqRecord]]):
+    def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], references: Optional[List[SeqRecord]]):
         """
         Save the batch results to output files.
         
@@ -678,7 +683,7 @@ class SeqGenerator:
         
         save_multi_fasta_from_dict(output_dict, output_dir)
 
-    def _print_header(self):
+    def __print_header(self):
         """
         Print the program header with basic information.
         """
@@ -689,7 +694,7 @@ class SeqGenerator:
         print(f"Reference library: {len(self.ref_sequences)} sequences loaded")
         print(f"Generating {self.batch} independent result file(s)")
 
-    def _print_summary(self, total_elapsed_time: float):
+    def __print_summary(self, total_elapsed_time: float):
         """
         Print a summary of the processing results.
         
@@ -707,19 +712,19 @@ class SeqGenerator:
         """
         Execute the sequence generation process.
         """
-        self._print_header()
+        self.__print_header()
         
         start_time = time.time()
         
         # Ensure output directory exists for the base path
-        self._pre_check()
+        self.__pre_check()
         
         # Process each batch (separate run)
         for batch_num in range(1, self.batch + 1):
-            self._process_single_batch(batch_num)
+            self.__process_single_batch(batch_num)
         
         total_elapsed_time = time.time() - start_time
-        self._print_summary(total_elapsed_time)
+        self.__print_summary(total_elapsed_time)
 
 
 def main():
