@@ -465,7 +465,8 @@ class SeqGenerator:
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
-    def _process_single_sequence(self, seq_record: SeqRecord, seq_num: int) -> Tuple[SeqRecord, Optional[List[SeqRecord]]]:
+    def _process_single_sequence(self, seq_record: SeqRecord, seq_num: int) -> Tuple[SeqRecord, 
+                                                                                     Optional[List[SeqRecord]]]:
         """
         Process a single sequence through all iterations using a tree-based algorithm.
         Directly navigates the tree for insertions without rebuilding it.
@@ -494,10 +495,10 @@ class SeqGenerator:
             
             # Sort positions in descending order to maintain position integrity during insertion
             # This ensures earlier insertions don't affect the positions of later insertions
-            insertion_data = sorted(zip(insert_positions, selected_refs), key=lambda x: x[0], reverse=True)
+            insert_positions, selected_refs = sort_multiple_lists(insert_positions, selected_refs, reverse=True)
             
             # Insert references directly into the tree in optimal order
-            for pos, ref_seq in insertion_data:
+            for pos, ref_seq in zip(insert_positions, selected_refs):
                 metadata = {'iteration': i + 1, 'rel_pos': pos}
                 root = root.insert_at_position(pos, ref_seq, metadata)
         
@@ -529,7 +530,8 @@ class SeqGenerator:
         else:
             return self.output_dir
 
-    def _process_chunk(self, chunk_idx: int, chunk_size: int, total_sequences: int) -> Tuple[List[SeqRecord], Optional[List[SeqRecord]]]:
+    def _process_chunk(self, chunk_idx: int, chunk_size: int, total_sequences: int) -> Tuple[List[SeqRecord], 
+                                                                                             Optional[List[SeqRecord]]]:
         """
         Process a chunk of sequences.
         
