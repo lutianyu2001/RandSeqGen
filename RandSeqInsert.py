@@ -237,6 +237,11 @@ def _load_multiple_ref_libs(path_list: List[str], weight_list: Optional[List[flo
     # return sort_multiple_lists(all_ref_sequence_list, all_ref_weight_list, key=len)
     all_ref_len_list, all_ref_sequence_list, all_ref_weight_list = sort_multiple_lists(
         all_ref_len_list, all_ref_sequence_list, all_ref_weight_list)
+    
+    # Uniform weights by default: If no weight provided, set all weights to 1
+    if not weight_list:
+        all_ref_weight_list = [1] * len(all_ref_sequence_list)
+
     return all_ref_sequence_list, all_ref_len_list, all_ref_weight_list
 
 
@@ -445,12 +450,9 @@ class SeqGenerator:
         self.flag_track = flag_track
 
         # Load input sequence
-        try:
-            self.input = list(SeqIO.parse(input_file, "fasta"))
-            if not self.input:
-                raise ValueError(f"[ERROR] No sequences found in input file {input_file}")
-        except Exception as e:
-            raise RuntimeError(f"[ERROR] Failed to load input file {input_file}: {str(e)}")
+        self.input = list(SeqIO.parse(input_file, "fasta"))
+        if not self.input:
+            raise ValueError(f"[ERROR] No sequences found in input file {input_file}")
 
         # Load reference sequences
         if ref_lib:
@@ -517,21 +519,6 @@ class SeqGenerator:
             used_refs, _ = root.collect_refs(seq_record.id)
         
         return new_seq_record, used_refs
-
-    def __get_batch_output_dir(self, batch_num: int) -> str:
-        """
-        Get the output directory for a specific batch.
-        
-        Args:
-            batch_num (int): The batch number (1-based index)
-            
-        Returns:
-            str: Path to the batch output directory
-        """
-        if self.batch > 1:
-            return f"{self.output_dir}_batch{batch_num}"
-        else:
-            return self.output_dir
 
     def _process_chunk(self, chunk_idx: int, chunk_size: int, total_sequences: int) -> Tuple[List[SeqRecord], 
                                                                                              Optional[List[SeqRecord]]]:
@@ -638,15 +625,7 @@ class SeqGenerator:
         # Set a different random seed for each batch for result diversity
         random.seed(int(time.time()) + batch_num)
         
-        # Create batch-specific output directory
-        batch_output_dir = self.__get_batch_output_dir(batch_num)
-        
-        # Ensure output directory exists
-        if not os.path.exists(batch_output_dir):
-            os.makedirs(batch_output_dir)
-        
         print(f"\nProcessing batch {batch_num}/{self.batch}")
-        print(f"Output directory: {batch_output_dir}")
         
         # Calculate total number of input sequences to process
         total_sequences = len(self.input)
@@ -657,15 +636,18 @@ class SeqGenerator:
         else:
             all_sequences, all_refs = self.__process_batch_single_thread(total_sequences)
         
+        os.makedirs(self.output_dir, exist_ok=True)
+        print(f"Output directory: {self.output_dir}")
+
         # Save results for this batch
-        self.__save_batch_results(batch_output_dir, all_sequences, all_refs)
+        self.__save_batch_results(self.output_dir, all_sequences, all_refs, batch_num)
         
         batch_elapsed_time = time.time() - batch_start_time
         print(f"Batch {batch_num} completed in {batch_elapsed_time:.2f} seconds")
         
         return batch_elapsed_time
 
-    def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], references: Optional[List[SeqRecord]]):
+    def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], references: Optional[List[SeqRecord]], batch_num: int = 1):
         """
         Save the batch results to output files.
         
@@ -673,13 +655,16 @@ class SeqGenerator:
             output_dir (str): Directory to save the results
             sequences (List[SeqRecord]): List of sequence records to save
             references (Optional[List[SeqRecord]]): List of reference records to save if tracking is enabled
+            batch_num (int): The batch number (1-based index)
         """
+        # Add batch suffix to filenames if multiple batches
+        suffix = f"_batch{batch_num}" if self.batch > 1 else ""
         print(f"Saving {len(sequences)} processed sequences")
-        output_dict = {"sequences.fasta": sequences}
+        output_dict = {f"sequences{suffix}.fasta": sequences}
         
         if self.flag_track and references:
             print(f"Saving {len(references)} reference sequence records")
-            output_dict["used_refs.fasta"] = references
+            output_dict[f"used_refs{suffix}.fasta"] = references
         
         save_multi_fasta_from_dict(output_dict, output_dir)
 
@@ -704,7 +689,7 @@ class SeqGenerator:
         print(f"\nAll batches completed in {total_elapsed_time:.2f} seconds")
         
         if self.batch > 1:
-            print(f"Results saved to {os.path.abspath(self.output_dir)}_batch[1-{self.batch}]")
+            print(f"Results saved to {os.path.abspath(self.output_dir)} with filenames sequences_batch[1-{self.batch}].fasta")
         else:
             print(f"Results saved to {os.path.abspath(self.output_dir)}")
 
