@@ -21,7 +21,7 @@ import time
 
 VERSION = "v0.1.0"
 INFO = ("by Tianyu (Sky) Lu (tlu83@wisc.edu)\n"
-        "released under LGPL-2.1 license")
+        "")
 
 # PRE-DEFINED PARAMETERS
 NUCLEOTIDES = ["A", "T", "G", "C"]
@@ -136,7 +136,7 @@ def load_sequences(path_list: Optional[List[str]], len_limit: Optional[int] = No
     return ref_sequences
 
 
-def _find_ref_lib_abs_path_list(path: str) -> Optional[List[str]]:
+def _find_ref_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
     """
     Locate the reference library files.
 
@@ -164,7 +164,7 @@ def _find_ref_lib_abs_path_list(path: str) -> Optional[List[str]]:
          "/path/to/program/lib/rice/rice_DTH.fa", "/path/to/program/lib/rice/rice_DTM.fa",
          "/path/to/program/lib/rice/rice_DTT.fa"]
     """
-    if path is None:
+    if not path:
         return None
 
     # Check if path exists and is a file
@@ -677,6 +677,17 @@ class SeqGenerator:
         
         save_multi_fasta_from_dict(output_dict, output_dir)
 
+    def _print_header(self):
+        """
+        Print the program header with basic information.
+        """
+        print(f"=== RandSeqInsert {VERSION} ===")
+        print(f"Processing input file: {self.input_file}")
+        print(f"Number of input sequences: {len(self.input)}")
+        print(f"Insertion settings: {self.insertion} insertions per sequence × {self.iteration} iterations")
+        print(f"Reference library: {len(self.ref_sequences)} sequences loaded")
+        print(f"Generating {self.batch} independent result file(s)")
+
     def _print_summary(self, total_elapsed_time: float):
         """
         Print a summary of the processing results.
@@ -690,17 +701,6 @@ class SeqGenerator:
             print(f"Results saved to {os.path.abspath(self.output_dir)}_batch[1-{self.batch}]")
         else:
             print(f"Results saved to {os.path.abspath(self.output_dir)}")
-
-    def _print_header(self):
-        """
-        Print the program header with basic information.
-        """
-        print(f"=== RandSeqInsert {VERSION} ===")
-        print(f"Processing input file: {self.input_file}")
-        print(f"Number of input sequences: {len(self.input)}")
-        print(f"Insertion settings: {self.insertion} insertions per sequence × {self.iteration} iterations")
-        print(f"Reference library: {len(self.ref_sequences)} sequences loaded")
-        print(f"Generating {self.batch} independent result file(s)")
 
     def execute(self):
         """
