@@ -35,48 +35,6 @@ DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_P
 # ======================================================================================================================
 
 
-def process_length(length_str: str) -> int:
-    """
-    Process a length string to return the number of bases.
-
-    This function converts various length formats (plain number, kb, mb) into
-    the actual number of bases for sequence generation.
-
-    Args:
-        length_str (str): A string specifying sequence length. Can be:
-            - A plain number (e.g., "100")
-            - Kilobases with 'kb' suffix (e.g., "1kb")
-            - Megabases with 'mb' suffix (e.g., "1mb")
-
-    Returns:
-        int: The number of bases represented by the input string.
-
-    Raises:
-        SystemExit: If the length string format is invalid.
-
-    Examples:
-        >>> process_length("100")
-        100
-        >>> process_length("1kb")
-        1000
-        >>> process_length("1mb")
-        1000000
-    """
-    length_str = length_str.lower()
-
-    # Check for kb/mb suffix
-    if length_str.endswith("kb"):
-        return int(float(length_str[:-2]) * 1000)
-    elif length_str.endswith("mb"):
-        return int(float(length_str[:-2]) * 1000000)
-
-    # Check if pure number or b suffix
-    if length_str.isdigit() or length_str.endswith("b"):
-        return int(length_str.replace('b', ''))
-
-    raise SystemExit("[ERROR] Invalid length format. Use number, kb or mb (e.g. 100, 1kb, 1mb)")
-
-
 def sort_multiple_lists(base: list, *lists: list, 
                         key: Optional[Callable] = None, reverse: bool = False) -> Union[list, tuple]:
     """
@@ -134,75 +92,6 @@ def create_sequence_record(seq: str, id: str) -> SeqRecord:
         SeqRecord: BioPython SeqRecord object for the sequence
     """
     return SeqRecord(Seq(seq), id=id, description="")
-
-
-def generate_random_sequence(length: int) -> str:
-    """
-    Generate a random DNA sequence of specified length.
-
-    Args:
-        length (int): The desired length of the sequence
-
-    Returns:
-        str: A random DNA sequence composed of nucleotides from NUCLEOTIDES
-    """
-    return "".join(random.choices(NUCLEOTIDES, k=length))
-
-
-def generate_random_segment_lengths(num_segment: int, total_length: int) -> List[int]:
-    """
-    Generate random segment lengths that sum to total_length.
-
-    Args:
-        num_segment (int): Number of segments to generate
-        total_length (int): Total length to divide into segments
-
-    Returns:
-        List[int]: List of segment lengths that sum to total_length
-
-    Note:
-        This is used to determine the distribution of random nucleotides
-        throughout the sequence in reference mode.
-    """
-    if num_segment < 2:
-        return [total_length]
-
-    # Generate random points to split the sequence
-    split_points: List[int] = sorted(random.sample(range(1, total_length), num_segment - 1))
-
-    # Calculate segment lengths
-    segments: List[int] = [split_points[0]]
-    for i in range(1, len(split_points)):
-        segments.append(split_points[i] - split_points[i - 1])
-    segments.append(total_length - split_points[-1])
-
-    return segments
-
-
-def binary_search_suitable_refs_index(sorted_ref_len_list: List[int], len_limit: int) -> int:
-    """
-    Find the index of the first reference sequence that does not fit within length limit using binary search.
-
-    Args:
-        sorted_ref_len_list (List[int]): List of lengths of reference sequences
-        len_limit (int): Maximum length of reference sequences to find
-
-    Returns:
-        int: Index of the first reference sequence whose length > len_limit
-
-    Note:
-        Uses binary search because reference sequences are pre-sorted by length.
-    """
-    left = 0
-    right = len(sorted_ref_len_list) - 1
-    while left <= right:
-        mid = (left + right) // 2
-        if sorted_ref_len_list[mid] <= len_limit:
-            left = mid + 1
-        else:
-            right = mid - 1
-
-    return left
 
 
 def save_multi_fasta_from_dict(records_dict: Dict[str, List[SeqRecord]], output_dir_path: str):
@@ -373,7 +262,7 @@ class SequenceNode:
         # Total length of the subtree for efficient traversal
         self.total_length = self.length
     
-    def update_total_length(self):
+    def __update_total_length(self):
         """
         Update the total length of this subtree.
         
@@ -407,7 +296,7 @@ class SequenceNode:
             else:
                 # Insert as left child
                 self.left = SequenceNode(ref_seq, True, ref_metadata)
-            self.update_total_length()
+            self.__update_total_length()
             return self
         
         # Position is within this node
@@ -415,7 +304,7 @@ class SequenceNode:
         node_end = node_start + self.length
         
         # Fast path: Position is within this node
-        if abs_position > node_start and abs_position < node_end:
+        if node_start < abs_position < node_end:
             # Split this node
             rel_pos = abs_position - node_start
             left_content = self.content[:rel_pos]
@@ -425,13 +314,13 @@ class SequenceNode:
             new_left = SequenceNode(left_content, self.is_reference, self.metadata)
             if self.left:
                 new_left.left = self.left
-                new_left.update_total_length()
+                new_left.__update_total_length()
             
             # Create new right child with right content and original right child
             new_right = SequenceNode(right_content, self.is_reference, self.metadata)
             if self.right:
                 new_right.right = self.right
-                new_right.update_total_length()
+                new_right.__update_total_length()
             
             # Replace this node's content with the reference
             self.content = ref_seq
@@ -442,7 +331,7 @@ class SequenceNode:
             # Set new children
             self.left = new_left
             self.right = new_right
-            self.update_total_length()
+            self.__update_total_length()
             
             return self
         
@@ -453,7 +342,7 @@ class SequenceNode:
             else:
                 # Insert as right child
                 self.right = SequenceNode(ref_seq, True, ref_metadata)
-            self.update_total_length()
+            self.__update_total_length()
             return self
         
         return self  # Should not reach here
@@ -466,10 +355,10 @@ class SequenceNode:
             str: The concatenated sequence
         """
         result = []
-        self._collect_content(result)
+        self.__collect_content(result)
         return "".join(result)
     
-    def _collect_content(self, result: list):
+    def __collect_content(self, result: list):
         """
         Helper method to collect node content in in-order traversal.
         
@@ -477,12 +366,12 @@ class SequenceNode:
             result (list): List to store content strings
         """
         if self.left:
-            self.left._collect_content(result)
+            self.left.__collect_content(result)
         
         result.append(self.content)
         
         if self.right:
-            self.right._collect_content(result)
+            self.right.__collect_content(result)
     
     def collect_refs(self, ref_records: list, seq_id: str, abs_position: int = 0):
         """
