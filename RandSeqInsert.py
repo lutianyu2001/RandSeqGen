@@ -411,6 +411,54 @@ class SequenceNode:
             ref_records.extend(right_refs)
         
         return ref_records, left_length + self.length + right_length
+    
+    def generate_tree_visual(self, abs_position: int = 0, depth: int = 0):
+        """
+        Generate a visual representation of the tree structure with node information.
+        
+        Args:
+            abs_position (int): Current absolute position in the concatenated sequence
+            depth (int): Current depth in the tree
+            
+        Returns:
+            Tuple[List[str], int]: A tuple containing:
+                - List of strings representing the tree structure
+                - The total length of this subtree
+        """
+        result = []
+        
+        # Process left subtree first
+        left_length = 0
+        if self.left:
+            left_lines, left_length = self.left.generate_tree_visual(abs_position, depth + 1)
+            result.extend(left_lines)
+        
+        # Current node's position in the final sequence
+        current_position = abs_position + left_length
+        end_position = current_position + self.length - 1  # -1 for 0-based indexing
+        
+        # Indentation for visual hierarchy
+        indent = "  " * depth
+        
+        # Node type indicator
+        node_type = "REF" if self.is_reference else "SEQ"
+        
+        # Node metadata for reference nodes
+        metadata_str = ""
+        if self.metadata and self.is_reference:
+            metadata_str = f" [iter: {self.metadata.get('iteration', '?')}, rel_pos: {self.metadata.get('rel_pos', '?')}]"
+        
+        # Format: Type | start-end | length | metadata
+        node_info = f"{indent}{node_type} | {current_position}-{end_position} | {self.length}{metadata_str}"
+        result.append(node_info)
+        
+        # Process right subtree
+        right_length = 0
+        if self.right:
+            right_lines, right_length = self.right.generate_tree_visual(current_position + self.length, depth + 1)
+            result.extend(right_lines)
+        
+        return result, left_length + self.length + right_length
 
 
 class SeqGenerator:
@@ -470,7 +518,8 @@ class SeqGenerator:
             os.makedirs(self.output_dir)
 
     def __process_single_sequence(self, seq_record: SeqRecord, seq_num: int) -> Tuple[SeqRecord, 
-                                                                                      Optional[List[SeqRecord]]]:
+                                                                                      Optional[List[SeqRecord]],
+                                                                                      Optional[SequenceNode]]:
         """
         Process a single sequence through all iterations using a tree-based algorithm.
         Directly navigates the tree for insertions without rebuilding it.
@@ -484,7 +533,8 @@ class SeqGenerator:
             seq_num (int): The sequence number
             
         Returns:
-            Tuple[SeqRecord, Optional[List[SeqRecord]]]: The processed sequence and used references if tracking
+            Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[SequenceNode]]: 
+                The processed sequence, used references if tracking, and the root node if tracking
         """
         # Start with a single node containing the original sequence
         root = SequenceNode(str(seq_record.seq))
@@ -515,11 +565,13 @@ class SeqGenerator:
         used_refs = None
         if self.flag_track:
             used_refs, _ = root.collect_refs(seq_record.id)
+            return new_seq_record, used_refs, root
         
-        return new_seq_record, used_refs
+        return new_seq_record, used_refs, None
 
     def _process_chunk(self, chunk_idx: int, chunk_size: int, total_sequences: int) -> Tuple[List[SeqRecord], 
-                                                                                             Optional[List[SeqRecord]]]:
+                                                                                             Optional[List[SeqRecord]],
+                                                                                             Optional[Dict[str, List[str]]]]:
         """
         Process a chunk of sequences.
         
@@ -529,26 +581,33 @@ class SeqGenerator:
             total_sequences (int): Total number of sequences to process
             
         Returns:
-            Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: The processed sequences and used references if tracking
+            Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[Dict[str, List[str]]]]: 
+                The processed sequences, used references if tracking, and tree visualizations if tracking
         """
         start_idx = chunk_idx * chunk_size
         end_idx = min(start_idx + chunk_size, total_sequences)
         
         processed_seqs = []
         used_refs = [] if self.flag_track else None
+        tree_visuals = {} if self.flag_track else None
         
         for i in range(start_idx, end_idx):
             seq_record = self.input[i]
-            processed_seq, refs = self.__process_single_sequence(seq_record, i + 1)
+            processed_seq, refs, root_node = self.__process_single_sequence(seq_record, i + 1)
             processed_seqs.append(processed_seq)
             
-            if self.flag_track and refs:
-                used_refs.extend(refs)
+            if self.flag_track:
+                if refs:
+                    used_refs.extend(refs)
+                if root_node:
+                    tree_lines, _ = root_node.generate_tree_visual()
+                    tree_visuals[seq_record.id] = tree_lines
         
-        return processed_seqs, used_refs
+        return processed_seqs, used_refs, tree_visuals
 
     def __process_batch_multiprocessing(self, total_sequences: int) -> Tuple[List[SeqRecord], 
-                                                                             Optional[List[SeqRecord]]]:
+                                                                             Optional[List[SeqRecord]],
+                                                                             Optional[Dict[str, List[str]]]]:
         """
         Process a batch of sequences using multiprocessing.
         
@@ -556,7 +615,8 @@ class SeqGenerator:
             total_sequences (int): Total number of sequences to process
             
         Returns:
-            Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: All processed sequences and references
+            Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[Dict[str, List[str]]]]: 
+                All processed sequences, references, and tree visualizations
         """
         # Calculate proper chunk size for work division
         chunk_size = max(1, total_sequences // (self.processors * 4))
@@ -571,19 +631,25 @@ class SeqGenerator:
         # Process chunks in parallel
         all_sequences = []
         all_refs = [] if self.flag_track else None
+        all_tree_visuals = {} if self.flag_track else None
         
         with mp.Pool(self.processors) as pool:
             results_iter = pool.starmap(self._process_chunk, chunk_args)
             
-            for i, (seqs, refs) in enumerate(results_iter, 1):
+            for i, (seqs, refs, tree_visuals) in enumerate(results_iter, 1):
                 all_sequences.extend(seqs)
-                if self.flag_track and refs:
-                    all_refs.extend(refs)
+                if self.flag_track:
+                    if refs:
+                        all_refs.extend(refs)
+                    if tree_visuals:
+                        all_tree_visuals.update(tree_visuals)
                 print(f"Completed chunk {i}/{num_chunks}")
         
-        return all_sequences, all_refs
+        return all_sequences, all_refs, all_tree_visuals
 
-    def __process_batch_single_thread(self, total_sequences: int) -> Tuple[List[SeqRecord], Optional[List[SeqRecord]]]:
+    def __process_batch_single_thread(self, total_sequences: int) -> Tuple[List[SeqRecord], 
+                                                                          Optional[List[SeqRecord]],
+                                                                          Optional[Dict[str, List[str]]]]:
         """
         Process a batch of sequences using a single thread.
         
@@ -591,22 +657,28 @@ class SeqGenerator:
             total_sequences (int): Total number of sequences to process
             
         Returns:
-            Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: All processed sequences and references
+            Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[Dict[str, List[str]]]]: 
+                All processed sequences, references, and tree visualizations
         """
         all_sequences = []
         all_refs = [] if self.flag_track else None
+        all_tree_visuals = {} if self.flag_track else None
         
         for i, seq_record in enumerate(self.input):
-            processed_seq, refs = self.__process_single_sequence(seq_record, i + 1)
+            processed_seq, refs, root_node = self.__process_single_sequence(seq_record, i + 1)
             all_sequences.append(processed_seq)
             
-            if self.flag_track and refs:
-                all_refs.extend(refs)
+            if self.flag_track:
+                if refs:
+                    all_refs.extend(refs)
+                if root_node:
+                    tree_lines, _ = root_node.generate_tree_visual()
+                    all_tree_visuals[seq_record.id] = tree_lines
             
             if (i + 1) % 10 == 0 or i + 1 == total_sequences:
                 print(f"Processed {i+1}/{total_sequences} sequences")
         
-        return all_sequences, all_refs
+        return all_sequences, all_refs, all_tree_visuals
 
     def __process_single_batch(self, batch_num: int) -> float:
         """
@@ -630,22 +702,25 @@ class SeqGenerator:
         
         # Divide work based on number of processors
         if self.processors > 1 and total_sequences > 1:
-            all_sequences, all_refs = self.__process_batch_multiprocessing(total_sequences)
+            all_sequences, all_refs, all_tree_visuals = self.__process_batch_multiprocessing(total_sequences)
         else:
-            all_sequences, all_refs = self.__process_batch_single_thread(total_sequences)
+            all_sequences, all_refs, all_tree_visuals = self.__process_batch_single_thread(total_sequences)
         
         os.makedirs(self.output_dir, exist_ok=True)
         print(f"Output directory: {self.output_dir}")
 
         # Save results for this batch
-        self.__save_batch_results(self.output_dir, all_sequences, all_refs, batch_num)
+        self.__save_batch_results(self.output_dir, all_sequences, all_refs, all_tree_visuals, batch_num)
         
         batch_elapsed_time = time.time() - batch_start_time
         print(f"Batch {batch_num} completed in {batch_elapsed_time:.2g} seconds")
         
         return batch_elapsed_time
 
-    def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], references: Optional[List[SeqRecord]], batch_num: int = 1):
+    def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], 
+                             references: Optional[List[SeqRecord]], 
+                             tree_visuals: Optional[Dict[str, List[str]]], 
+                             batch_num: int = 1):
         """
         Save the batch results to output files.
         
@@ -653,6 +728,7 @@ class SeqGenerator:
             output_dir (str): Directory to save the results
             sequences (List[SeqRecord]): List of sequence records to save
             references (Optional[List[SeqRecord]]): List of reference records to save if tracking is enabled
+            tree_visuals (Optional[Dict[str, List[str]]]): Dictionary mapping sequence IDs to tree visualization lines
             batch_num (int): The batch number (1-based index)
         """
         # Add batch suffix to filenames if multiple batches
@@ -660,9 +736,21 @@ class SeqGenerator:
         print(f"Saving {len(sequences)} processed sequences")
         output_dict = {f"sequences{suffix}.fasta": sequences}
         
-        if self.flag_track and references:
-            print(f"Saving {len(references)} reference sequence records")
-            output_dict[f"used_refs{suffix}.fasta"] = references
+        if self.flag_track:
+            if references:
+                print(f"Saving {len(references)} reference sequence records")
+                output_dict[f"used_refs{suffix}.fasta"] = references
+            
+            if tree_visuals:
+                print(f"Saving tree structure visualizations")
+                tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
+                with open(tree_file_path, 'w') as tree_file:
+                    for seq_id, lines in tree_visuals.items():
+                        tree_file.write(f"=== Tree structure for sequence: {seq_id} ===\n")
+                        tree_file.write("Format: Type | start-end | length [metadata]\n")
+                        tree_file.write("SEQ: Original sequence node, REF: Inserted reference node\n")
+                        tree_file.write("\n".join(lines))
+                        tree_file.write("\n\n")
         
         save_multi_fasta_from_dict(output_dict, output_dir)
 
