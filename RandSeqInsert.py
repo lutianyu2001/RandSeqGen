@@ -438,7 +438,7 @@ class SequenceNode:
         # Metadata information
         metadata_str = ""
         if self.metadata and self.is_reference:
-            metadata_str = f" [iter:{self.metadata.get('iteration', '?')},pos:{self.metadata.get('rel_pos', '?')}]"
+            metadata_str = f" [iter:{self.metadata.get('iteration', '?')}]"
         
         # Format node label
         node_label = f"{node_type}|{current_position}-{end_position}|{self.length}{metadata_str}"
@@ -955,7 +955,7 @@ class SeqGenerator:
             
             # Insert references directly into the tree in optimal order
             for pos, ref_seq in zip(insert_positions, selected_refs):
-                metadata = {'iteration': i + 1, 'rel_pos': pos}
+                metadata = {'iteration': i + 1}
                 root = root.insert(pos, ref_seq, metadata)
         
         # Generate final sequence
