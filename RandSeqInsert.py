@@ -412,53 +412,103 @@ class SequenceNode:
         
         return ref_records, left_length + self.length + right_length
     
-    def generate_tree_visual(self, abs_position: int = 0, depth: int = 0):
+    def generate_tree_visual(self, abs_position: int = 0):
         """
         Generate a visual representation of the tree structure with node information.
         
         Args:
             abs_position (int): Current absolute position in the concatenated sequence
-            depth (int): Current depth in the tree
             
         Returns:
-            Tuple[List[str], int]: A tuple containing:
+            Tuple[List[str], int, int]: A tuple containing:
                 - List of strings representing the tree structure
                 - The total length of this subtree
+                - The height of this subtree
         """
-        result = []
-        
-        # Process left subtree first
-        left_length = 0
+        # First collect node information and positions
+        left_lines, left_length, left_height = [], 0, 0
         if self.left:
-            left_lines, left_length = self.left.generate_tree_visual(abs_position, depth + 1)
-            result.extend(left_lines)
+            left_lines, left_length, left_height = self.left.generate_tree_visual(abs_position)
         
-        # Current node's position in the final sequence
         current_position = abs_position + left_length
+        
+        right_lines, right_length, right_height = [], 0, 0
+        if self.right:
+            right_lines, right_length, right_height = self.right.generate_tree_visual(current_position + self.length)
+        
+        # Node information
+        node_type = "REF" if self.is_reference else "SEQ"
         end_position = current_position + self.length - 1  # -1 for 0-based indexing
         
-        # Indentation for visual hierarchy
-        indent = "  " * depth
-        
-        # Node type indicator
-        node_type = "REF" if self.is_reference else "SEQ"
-        
-        # Node metadata for reference nodes
         metadata_str = ""
         if self.metadata and self.is_reference:
-            metadata_str = f" [iter: {self.metadata.get('iteration', '?')}, rel_pos: {self.metadata.get('rel_pos', '?')}]"
+            metadata_str = f" [iter:{self.metadata.get('iteration', '?')},pos:{self.metadata.get('rel_pos', '?')}]"
         
-        # Format: Type | start-end | length | metadata
-        node_info = f"{indent}{node_type} | {current_position}-{end_position} | {self.length}{metadata_str}"
-        result.append(node_info)
+        # Node content (truncated if too long)
+        content_str = self.content[:10] + "..." if len(self.content) > 10 else self.content
         
-        # Process right subtree
-        right_length = 0
-        if self.right:
-            right_lines, right_length = self.right.generate_tree_visual(current_position + self.length, depth + 1)
-            result.extend(right_lines)
+        # Format node label
+        node_label = f"{node_type}|{current_position}-{end_position}|{self.length}{metadata_str}"
         
-        return result, left_length + self.length + right_length
+        # Calculate width needed for this node
+        node_width = max(len(node_label), 10)  # Minimum width to avoid too narrow nodes
+        
+        # Center the node label
+        node_line = node_label.center(node_width, ' ')
+        
+        # Prepare the result lines for this node and its subtrees
+        result = []
+        
+        # Calculate height of this subtree
+        height = max(left_height, right_height) + 1
+        
+        # Handle leaf node case
+        if not self.left and not self.right:
+            result.append("┌" + "─" * (node_width - 2) + "┐")
+            result.append("│" + node_line + "│")
+            result.append("└" + "─" * (node_width - 2) + "┘")
+            return result, self.length, 1
+        
+        # Handle nodes with children
+        # Calculate spaces needed for aligning children
+        left_width = len(left_lines[0]) if left_lines else 0
+        right_width = len(right_lines[0]) if right_lines else 0
+        
+        # Top of node box
+        result.append("┌" + "─" * (node_width - 2) + "┐")
+        result.append("│" + node_line + "│")
+        result.append("└" + "─" * (node_width - 2) + "┘")
+        
+        # Add connecting lines to children
+        if self.left and self.right:
+            # Both children present
+            # Connector line from this node to left and right children
+            left_branch = "┌" + "─" * (left_width // 2)
+            right_branch = "─" * (right_width // 2) + "┐"
+            connector = left_branch + "┴" + right_branch
+            result.append(connector.center(max(node_width, left_width + right_width), ' '))
+            
+            # Merge left and right subtrees side by side
+            for i in range(max(len(left_lines), len(right_lines))):
+                left_part = left_lines[i] if i < len(left_lines) else " " * left_width
+                right_part = right_lines[i] if i < len(right_lines) else " " * right_width
+                result.append(left_part + " " + right_part)
+                
+        elif self.left:
+            # Only left child
+            connector = "│".center(node_width)
+            result.append(connector)
+            for line in left_lines:
+                result.append(line)
+                
+        elif self.right:
+            # Only right child
+            connector = "│".center(node_width)
+            result.append(connector)
+            for line in right_lines:
+                result.append(line)
+        
+        return result, left_length + self.length + right_length, height
 
 
 class SeqGenerator:
@@ -600,7 +650,7 @@ class SeqGenerator:
                 if refs:
                     used_refs.extend(refs)
                 if root_node:
-                    tree_lines, _ = root_node.generate_tree_visual()
+                    tree_lines, _, _ = root_node.generate_tree_visual()
                     tree_visuals[seq_record.id] = tree_lines
         
         return processed_seqs, used_refs, tree_visuals
@@ -672,7 +722,7 @@ class SeqGenerator:
                 if refs:
                     all_refs.extend(refs)
                 if root_node:
-                    tree_lines, _ = root_node.generate_tree_visual()
+                    tree_lines, _, _ = root_node.generate_tree_visual()
                     all_tree_visuals[seq_record.id] = tree_lines
             
             if (i + 1) % 10 == 0 or i + 1 == total_sequences:
@@ -744,13 +794,13 @@ class SeqGenerator:
             if tree_visuals:
                 print(f"Saving tree structure visualizations")
                 tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
-                with open(tree_file_path, 'w') as tree_file:
+                with open(tree_file_path, 'w', encoding='utf-8') as tree_file:
                     for seq_id, lines in tree_visuals.items():
-                        tree_file.write(f"=== Tree structure for sequence: {seq_id} ===\n")
-                        tree_file.write("Format: Type | start-end | length [metadata]\n")
-                        tree_file.write("SEQ: Original sequence node, REF: Inserted reference node\n")
+                        tree_file.write(f"=== 树结构可视化: {seq_id} ===\n")
+                        tree_file.write("节点格式: 类型|开始-结束|长度[元数据]\n")
+                        tree_file.write("SEQ: 原始序列节点, REF: 插入的参考序列节点\n\n")
                         tree_file.write("\n".join(lines))
-                        tree_file.write("\n\n")
+                        tree_file.write("\n\n" + "="*80 + "\n\n")
         
         save_multi_fasta_from_dict(output_dict, output_dir)
 
