@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Random DNA Sequence Insertion Generator
+Random Sequence Insertion Generator
 
-This program takes an input DNA sequence and performs random insertions using sequences
+This program takes an input sequence and performs random insertions using sequences
 from a reference library. It supports multiprocessing for efficient sequence generation.
 
 Author: Tianyu Lu (tlu83@wisc.edu)
