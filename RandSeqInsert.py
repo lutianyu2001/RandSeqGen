@@ -412,15 +412,12 @@ class SequenceNode:
         
         return ref_records, left_length + self.length + right_length
     
-    def generate_tree_visual(self, abs_position: int = 0, level: int = 0, position: int = 0, total_width: int = 0):
+    def generate_tree_visual(self, abs_position: int = 0):
         """
         Generate a visual representation of the tree structure with node information.
         
         Args:
             abs_position (int): Current absolute position in the concatenated sequence
-            level (int): Current level in the tree (0 for root)
-            position (int): Position of this node in its level
-            total_width (int): Total width of the tree visualization
             
         Returns:
             Tuple[List[str], int, int]: A tuple containing:
@@ -431,15 +428,13 @@ class SequenceNode:
         # First collect node information and positions
         left_lines, left_length, left_height = [], 0, 0
         if self.left:
-            left_lines, left_length, left_height = self.left.generate_tree_visual(
-                abs_position, level + 1, position * 2, total_width)
+            left_lines, left_length, left_height = self.left.generate_tree_visual(abs_position)
         
         current_position = abs_position + left_length
         
         right_lines, right_length, right_height = [], 0, 0
         if self.right:
-            right_lines, right_length, right_height = self.right.generate_tree_visual(
-                current_position + self.length, level + 1, position * 2 + 1, total_width)
+            right_lines, right_length, right_height = self.right.generate_tree_visual(current_position + self.length)
         
         # Node information
         node_type = "REF" if self.is_reference else "SEQ"
@@ -461,16 +456,6 @@ class SequenceNode:
         # Center the node label
         node_line = node_label.center(node_width - 2, ' ')  # -2 for frame characters
         
-        # Calculate the position of this node in the visualization
-        if total_width == 0:
-            # For root node, calculate total width based on tree height
-            total_width = 2 ** (max(left_height, right_height) + 1) * node_width
-        
-        # Calculate the horizontal position for this node
-        level_width = 2 ** level
-        node_spacing = total_width // level_width
-        node_pos = position * node_spacing + (node_spacing - node_width) // 2
-        
         # Prepare result lines for this node and its subtrees
         result = []
         
@@ -479,60 +464,111 @@ class SequenceNode:
         
         # Handle leaf node case
         if not self.left and not self.right:
-            # Add padding to position the node
-            padding = " " * node_pos
-            result.append(padding + "┌" + "─" * (node_width - 2) + "┐")
-            result.append(padding + "│" + node_line + "│")
-            result.append(padding + "└" + "─" * (node_width - 2) + "┘")
+            result.append("┌" + "─" * (node_width - 2) + "┐")
+            result.append("│" + node_line + "│")
+            result.append("└" + "─" * (node_width - 2) + "┘")
             return result, self.length, 1
         
         # Handle nodes with children
-        # Add padding to position the node
-        padding = " " * node_pos
-        result.append(padding + "┌" + "─" * (node_width - 2) + "┐")
-        result.append(padding + "│" + node_line + "│")
-        result.append(padding + "└" + "─" * (node_width - 2) + "┘")
+        # Calculate space needed for aligning children
+        left_width = len(left_lines[0]) if left_lines else 0
+        right_width = len(right_lines[0]) if right_lines else 0
+        
+        # Calculate total width needed for the current node and its children
+        # Add more space between subtrees to create a proper pyramid shape
+        spacing = max(12, node_width // 2)  # Increased spacing between left and right subtrees
+        
+        # Node box
+        result.append("┌" + "─" * (node_width - 2) + "┐")
+        result.append("│" + node_line + "│")
+        result.append("└" + "─" * (node_width - 2) + "┘")
         
         # Add connecting lines to children
         if self.left and self.right:
             # Both children exist
-            # Calculate positions for left and right children
-            left_child_pos = (position * 2) * node_spacing + (node_spacing - node_width) // 2
-            right_child_pos = (position * 2 + 1) * node_spacing + (node_spacing - node_width) // 2
-            
-            # Add vertical connector from this node
-            connector_line = " " * node_pos + " " * (node_width // 2) + "│"
+            # Add vertical connector from the node
+            connector_line = " " * ((node_width - 1) // 2) + "│" + " " * ((node_width - 1) // 2)
             result.append(connector_line)
             
-            # Add horizontal connector to children
-            left_conn = " " * (left_child_pos + node_width // 2) + "┌"
-            right_conn = " " * (right_child_pos + node_width // 2) + "┐"
-            connector_line = " " * (left_child_pos + node_width // 2) + "┴" + "─" * (right_child_pos - left_child_pos - node_width) + "┴"
-            result.append(connector_line)
+            # Calculate center positions for better alignment
+            left_side = (node_width - 1) // 2
+            right_side = node_width - left_side - 1
             
-            # Merge left and right subtrees with proper spacing
+            # Build fork with proper spacing
+            fork_line = " " * (left_side - 1) + "┌" + "┴" + "┐" + " " * (right_side - 1)
+            result.append(fork_line)
+            
+            # Calculate space padding for left and right sides to create pyramid effect
+            # The padding increases with tree depth to create a proper pyramid shape
+            left_padding = spacing * (max(1, height - left_height))
+            right_padding = spacing * (max(1, height - right_height))
+            
+            # Create the connecting lines with proper indentation
+            # Extend horizontal connections to better show the tree structure
+            left_ext = "─" * max(3, left_padding - 2)
+            right_ext = "─" * max(3, right_padding - 2)
+            
+            left_conn = " " * (left_side - 1) + "│" + " " * (node_width - left_side)
+            right_conn = " " * (node_width - right_side) + "│" + " " * (right_side - 1)
+            result.append(left_conn)
+            result.append(right_conn)
+            
+            # Add horizontal connections with proper length
+            left_hconn = " " * (left_side - 1) + "└" + left_ext + " " * (node_width - left_side - len(left_ext) - 1)
+            right_hconn = " " * (node_width - right_side - len(right_ext) + 1) + right_ext + "┘" + " " * (right_side - 2)
+            result.append(left_hconn)
+            result.append(right_hconn)
+            
+            # Calculate padding for left and right subtrees
+            left_tree_padding = max(0, left_padding - len(left_ext) - 1)
+            right_tree_padding = max(0, right_padding - len(right_ext) - 1)
+            
+            # Merge left and right subtrees with proper padding
             for i in range(max(len(left_lines), len(right_lines))):
-                left_line = left_lines[i] if i < len(left_lines) else " " * left_child_pos
-                right_line = right_lines[i] if i < len(right_lines) else " " * right_child_pos
-                result.append(left_line + right_line)
+                if i < len(left_lines):
+                    left_part = " " * left_tree_padding + left_lines[i]
+                else:
+                    left_part = " " * (left_tree_padding + left_width)
+                    
+                if i < len(right_lines):
+                    right_part = right_lines[i] + " " * right_tree_padding
+                else:
+                    right_part = " " * (right_width + right_tree_padding)
+                    
+                # Add spacing between subtrees
+                result.append(left_part + " " * spacing + right_part)
                 
         elif self.left:
-            # Only left child
-            left_child_pos = (position * 2) * node_spacing + (node_spacing - node_width) // 2
-            connector = " " * node_pos + " " * (node_width // 2) + "│"
+            # Only left child exists
+            connector = " " * ((node_width - 1) // 2) + "│" + " " * ((node_width - 1) // 2)
             result.append(connector)
-            result.append(connector)
+            result.append(connector)  # Add extra connector line
+            
+            # Add horizontal connector
+            h_conn = " " * ((node_width - 1) // 2) + "└" + "─" * 3
+            result.append(h_conn)
+            
+            # Calculate appropriate padding based on height
+            padding = max(6, (height - left_height) * 4)
+            
             for line in left_lines:
-                result.append(line)
+                result.append(" " * padding + line)
                 
         elif self.right:
-            # Only right child
-            right_child_pos = (position * 2 + 1) * node_spacing + (node_spacing - node_width) // 2
-            connector = " " * node_pos + " " * (node_width // 2) + "│"
+            # Only right child exists
+            connector = " " * ((node_width - 1) // 2) + "│" + " " * ((node_width - 1) // 2)
             result.append(connector)
-            result.append(connector)
+            result.append(connector)  # Add extra connector line
+            
+            # Add horizontal connector
+            h_conn = " " * ((node_width - 1) // 2 - 3) + "─" * 3 + "┘" + " " * ((node_width - 1) // 2)
+            result.append(h_conn)
+            
+            # Calculate appropriate padding based on height
+            padding = max(6, (height - right_height) * 4)
+            
             for line in right_lines:
-                result.append(line)
+                result.append(" " * padding + line)
         
         return result, left_length + self.length + right_length, height
 
