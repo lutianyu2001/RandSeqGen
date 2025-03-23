@@ -505,10 +505,6 @@ class SequenceNode:
             left_conn_pos = left_box_pos + left_child_center
             right_conn_pos = right_box_pos + right_child_center
             
-            # Add vertical connector from parent node
-            vert_conn = " " * parent_center + "│" + " " * (total_width - parent_center - 1)
-            result.append(vert_conn)
-            
             # Create fork line
             # First determine where the fork center should be
             if parent_center >= left_conn_pos and parent_center <= right_conn_pos:
@@ -551,12 +547,6 @@ class SequenceNode:
                 
             result.append(fork_line)
             
-            # Add vertical connectors to children
-            vert_line = " " * left_conn_pos + "│" + " " * (right_conn_pos - left_conn_pos) + "│"
-            if len(vert_line) < total_width:
-                vert_line += " " * (total_width - len(vert_line))
-            result.append(vert_line)
-            
             # Add the children side by side
             for i in range(max(len(left_lines), len(right_lines))):
                 line = ""
@@ -590,13 +580,10 @@ class SequenceNode:
             # Total width needed
             total_width = max(node_width, left_width)
             
-            # Add vertical connector from parent
-            result.append(" " * parent_center + "│" + " " * (total_width - parent_center - 1))
-            
             # Create horizontal connector using only the specified characters
+            connector_line = ""
+            
             if parent_center != left_child_center:
-                connector_line = ""
-                
                 # Left side connection
                 if parent_center > left_child_center:
                     # Parent is to the right of child
@@ -604,15 +591,15 @@ class SequenceNode:
                 else:
                     # Parent is to the left of child
                     connector_line += " " * parent_center + "┴" + "─" * (left_child_center - parent_center - 1) + "┐"
-                
-                # Add padding
-                if len(connector_line) < total_width:
-                    connector_line += " " * (total_width - len(connector_line))
-                    
-                result.append(connector_line)
             else:
-                # Centers align, just use vertical line
-                result.append(" " * parent_center + "│" + " " * (total_width - parent_center - 1))
+                # Centers align, use a simpler connector
+                connector_line += " " * parent_center + "┴"
+            
+            # Add padding
+            if len(connector_line) < total_width:
+                connector_line += " " * (total_width - len(connector_line))
+                
+            result.append(connector_line)
             
             # Add left subtree
             for line in left_lines:
@@ -630,9 +617,6 @@ class SequenceNode:
             right_pos = max(0, parent_center - right_child_center)
             total_width = max(node_width, right_pos + right_width)
             
-            # Add vertical connector from parent
-            # result.append(" " * parent_center + "│" + " " * (total_width - parent_center - 1))
-            
             # Create horizontal connector using only specified characters
             connector_line = ""
             
@@ -643,8 +627,8 @@ class SequenceNode:
                 
                 connector_line += " " * (left_pos - 1) + "┌" + "─" * (right_pos - left_pos - 1) + "┐"
             else:
-                # Centers align
-                connector_line += " " * parent_center + "│"
+                # Centers align, use a simpler connector
+                connector_line += " " * parent_center + "┴"
                 
             # Add padding
             if len(connector_line) < total_width:
