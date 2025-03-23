@@ -765,12 +765,6 @@ class SequenceNode:
             # 更新节点深度
             structure[i] = (node, start, end, depth)
         
-        # 如果提供了序列ID，显示标题
-        if seq_id:
-            print(f"输入序列 {seq_id} 结构可视化:", file=output_file)
-            print("=" * max_width, file=output_file)
-            print("", file=output_file)
-        
         # 输出可视化
         total_length = structure[-1][2] + 1  # 最后一个节点的结束位置 + 1
         
@@ -789,6 +783,7 @@ class SequenceNode:
             if page_count > 1:
                 print(f"序列部分 {page+1}/{page_count}: 位置 {page_start}-{page_end}", file=output_file)
                 print("-" * max_width, file=output_file)
+                print(file=output_file)
             
             # 筛选当前页范围内的节点
             page_nodes = [(node, start, end, depth) for node, start, end, depth in structure 
