@@ -631,7 +631,7 @@ class SequenceNode:
             total_width = max(node_width, right_pos + right_width)
             
             # Add vertical connector from parent
-            result.append(" " * parent_center + "│" + " " * (total_width - parent_center - 1))
+            # result.append(" " * parent_center + "│" + " " * (total_width - parent_center - 1))
             
             # Create horizontal connector using only specified characters
             connector_line = ""
