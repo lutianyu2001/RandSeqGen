@@ -705,19 +705,7 @@ class SequenceNode:
             result.extend([line.ljust(total_width) for line in padded_right_lines])
         
         return result, left_length + self.length + right_length, height
-        
-    def visualize(self, depth=0, output_file=None, abs_position=0):
-        """
-        生成序列节点及其子节点的可视化表示
-        
-        Args:
-            depth (int): 当前节点的嵌套深度
-            output_file: 输出文件对象
-            abs_position (int): 当前节点在完整序列中的绝对起始位置
-        """
-        # 这里的实现会被新方法替代，保留方法签名以兼容现有代码
-        pass
-    
+
     def collect_sequence_structure(self, abs_position=0):
         """
         收集序列结构信息，用于可视化
@@ -792,6 +780,9 @@ class SequenceNode:
             page_start = page * page_size
             page_end = min((page + 1) * page_size - 1, total_length - 1)
             
+            # 计算当前页的长度
+            current_page_length = page_end - page_start + 1
+            
             # 打印页标题
             if page_count > 1:
                 print(f"序列部分 {page+1}/{page_count}: 位置 {page_start}-{page_end}", file=output_file)
@@ -807,6 +798,12 @@ class SequenceNode:
                 vis_start = max(start, page_start)
                 vis_end = min(end, page_end)
                 
+                # 计算节点在当前页中的可见长度
+                visible_length = vis_end - vis_start + 1
+                
+                # 计算节点可见长度占当前页长度的百分比
+                length_percentage = visible_length / current_page_length
+                
                 # 缩进显示嵌套关系
                 indent = "  " * depth
                 
@@ -817,11 +814,15 @@ class SequenceNode:
                 start_preview = node.content[:VIZ_SEQ_PREVIEW_LENGTH]
                 end_preview = node.content[-VIZ_SEQ_PREVIEW_LENGTH:] if len(node.content) >= VIZ_SEQ_PREVIEW_LENGTH else node.content
                 
-                # 计算表示序列的符号数量
+                # 计算表示序列的符号数量 - 修改为基于当前页中的比例
                 available_width = max_width - len(indent) - len(str(start)) - len(str(end)) - \
                                  len(start_preview) - len(end_preview) - len(node_type) - len(str(node.length)) - 20
                 
-                symbols_count = max(1, min(available_width, int(node.length / 10)))
+                # 基于百分比和可用宽度计算符号数量
+                max_symbols = 50  # 最大符号数量
+                symbols_count = max(1, min(available_width, int(length_percentage * max_symbols)))
+                
+                # 使用不同的符号表示不同类型的节点
                 symbols = "=" * symbols_count if node_type == "SEQ" else "-" * symbols_count
                 
                 # 生成节点可视化行
