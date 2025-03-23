@@ -28,6 +28,10 @@ NUCLEOTIDES = ["A", "T", "G", "C"]
 DEFAULT_ALLOCATED_CPU_CORES = os.cpu_count() - 2 if os.cpu_count() > 2 else 1
 DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqInsert-Result"
 
+# 可视化参数
+VIZ_MAX_WIDTH = 80  # 可视化输出的最大宽度（字符数）
+VIZ_SEQ_PREVIEW_LENGTH = 5  # 在可视化中显示序列内容的前后碱基数量
+
 PROGRAM_ROOT_DIR_ABS_PATH = os.path.dirname(__file__)
 DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_PATH)
 
@@ -701,6 +705,55 @@ class SequenceNode:
             result.extend([line.ljust(total_width) for line in padded_right_lines])
         
         return result, left_length + self.length + right_length, height
+        
+    def visualize(self, depth=0, prefix="", output_file=None, abs_position=0):
+        """
+        生成序列节点及其子节点的可视化表示
+        
+        Args:
+            depth (int): 当前节点的嵌套深度
+            prefix (str): 行前缀，用于缩进
+            output_file: 输出文件对象
+            abs_position (int): 当前节点在完整序列中的绝对起始位置
+        """
+        # 计算左侧节点的总长度
+        left_length = self.left.total_length if self.left else 0
+        
+        # 计算当前节点在完整序列中的起始和结束位置
+        start_pos = abs_position
+        end_pos = start_pos + self.length - 1
+        
+        # 缩进显示嵌套关系
+        indent = "  " * depth
+        
+        # 确定节点类型
+        node_type = "REF" if self.is_reference else "SEQ"
+        
+        # 获取序列预览
+        start_preview = self.content[:VIZ_SEQ_PREVIEW_LENGTH]
+        end_preview = self.content[-VIZ_SEQ_PREVIEW_LENGTH:] if len(self.content) >= VIZ_SEQ_PREVIEW_LENGTH else self.content
+        
+        # 计算表示序列的符号数量（根据最大宽度调整）
+        available_width = VIZ_MAX_WIDTH - len(indent) - len(str(start_pos)) - len(str(end_pos)) - \
+                         len(start_preview) - len(end_preview) - len(node_type) - len(str(self.length)) - 20
+        
+        symbols_count = max(1, min(available_width, int(self.length / 10)))
+        symbols = "=" * symbols_count if node_type == "SEQ" else "-" * symbols_count
+        
+        # 生成节点可视化行
+        line = f"{indent}| {start_pos} {start_preview} {symbols} {node_type} ({self.length}) {symbols} {end_preview} {end_pos} |"
+        print(line, file=output_file)
+        
+        # 递归可视化左子树
+        if self.left:
+            self.left.visualize(depth + 1, prefix, output_file, abs_position)
+        
+        # 计算当前节点内容后的绝对位置（用于右子树）
+        right_pos = abs_position + (self.left.total_length if self.left else 0) + self.length
+        
+        # 递归可视化右子树
+        if self.right:
+            self.right.visualize(depth + 1, prefix, output_file, right_pos)
 
 
 class SeqGenerator:
@@ -710,7 +763,8 @@ class SeqGenerator:
 
     def __init__(self, input_file: str, insertion: int, iteration: int, batch: int, processors: int, output_dir: str,
                  ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
-                 ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False):
+                 ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
+                 flag_visualize: bool = False):
         """
         Initialize the sequence generator.
 
@@ -726,6 +780,7 @@ class SeqGenerator:
             ref_len_limit (int, optional): Maximum length limit for reference sequences to load
             flag_filter_n (bool): Whether to filter out sequences containing N
             flag_track (bool): Whether to track reference sequences used
+            flag_visualize (bool): Whether to generate tree visualization files
         """
         self.input_file = input_file
         self.insertion = insertion
@@ -736,6 +791,7 @@ class SeqGenerator:
         self.ref_len_limit = ref_len_limit
         self.flag_filter_n = flag_filter_n
         self.flag_track = flag_track
+        self.flag_visualize = flag_visualize
 
         # Load input sequence
         self.input = list(SeqIO.parse(input_file, "fasta"))
@@ -798,10 +854,14 @@ class SeqGenerator:
                 metadata = {'iteration': i + 1, 'rel_pos': pos}
                 root = root.insert(pos, ref_seq, metadata)
         
-        # Generate the final sequence string and create sequence record
+        # 最终生成序列
         final_seq = str(root)
         new_id = f"{seq_record.id}_iter{self.iteration}_ins{self.insertion}"
         new_seq_record = create_sequence_record(final_seq, new_id)
+        
+        # 生成可视化（如果启用）
+        if self.flag_visualize:
+            self.visualize_sequence(seq_record.id, root, self.output_dir)
         
         # Only collect reference sequences if tracking is enabled
         used_refs = None
@@ -1006,6 +1066,8 @@ class SeqGenerator:
         print(f"Insertion settings: {self.insertion} insertions per sequence × {self.iteration} iterations")
         print(f"Reference library: {len(self.ref_sequences)} sequences loaded")
         print(f"Generating {self.batch} independent result file(s)")
+        if self.flag_visualize:
+            print(f"Visualization: Enabled (output to {os.path.join(self.output_dir, 'seq_visualization')})")
 
     def __print_summary(self, total_elapsed_time: float):
         """
@@ -1020,6 +1082,9 @@ class SeqGenerator:
             print(f"Results saved to {os.path.abspath(self.output_dir)} with filenames sequences_batch[1-{self.batch}].fasta")
         else:
             print(f"Results saved to {os.path.abspath(self.output_dir)}")
+            
+        if self.flag_visualize:
+            print(f"Sequence visualizations saved to {os.path.join(os.path.abspath(self.output_dir), 'seq_visualization')}")
 
     def execute(self):
         """
@@ -1038,6 +1103,39 @@ class SeqGenerator:
         
         total_elapsed_time = time.time() - start_time
         self.__print_summary(total_elapsed_time)
+
+    def visualize_sequence(self, seq_id, root_node, output_dir):
+        """
+        为指定序列创建可视化文件
+        
+        Args:
+            seq_id (str): 序列ID
+            root_node (SequenceNode): 序列的根节点
+            output_dir (str): 输出目录
+        """
+        # 创建可视化文件目录
+        viz_dir = os.path.join(output_dir, "seq_visualization")
+        os.makedirs(viz_dir, exist_ok=True)
+        
+        # 创建可视化文件
+        viz_filename = f"{seq_id}_visualization.txt"
+        viz_path = os.path.join(viz_dir, viz_filename)
+        
+        with open(viz_path, 'w') as f:
+            # 添加标题
+            f.write(f"序列可视化: {seq_id}\n")
+            f.write("="*80 + "\n\n")
+            f.write("说明:\n")
+            f.write("- SEQ: 原始序列节点\n")
+            f.write("- REF: 插入的参考序列节点\n")
+            f.write("- 数字表示序列在完整序列中的位置\n")
+            f.write("- 左右两侧显示序列的实际内容（前后各5个碱基）\n")
+            f.write("- 缩进表示嵌套层级\n\n")
+            f.write("="*80 + "\n\n")
+            
+            # 调用根节点的可视化方法
+            f.write(f"输入序列 {seq_id} 完整结构:\n")
+            root_node.visualize(0, "", f)
 
 
 def main():
@@ -1087,6 +1185,8 @@ def main():
                                 help="Filter out sequences containing N. Enable this option to exclude reference sequences containing N bases.")
     flag_group.add_argument("--track", action="store_true",
                        help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
+    flag_group.add_argument("--visualize", action="store_true",
+                       help="生成序列插入可视化文件，以文本形式展示原始序列和参考序列的嵌套关系")
 
     parsed_args = parser.parse_args()
 
@@ -1101,6 +1201,7 @@ def main():
     ref_len_limit = parsed_args.limit
     flag_filter_n = parsed_args.filter_n
     flag_track = parsed_args.track
+    flag_visualize = parsed_args.visualize
 
     generator = SeqGenerator(
         input_file=input_file,
@@ -1113,7 +1214,8 @@ def main():
         ref_lib_weight=ref_lib_weight,
         ref_len_limit=ref_len_limit,
         flag_filter_n=flag_filter_n,
-        flag_track=flag_track
+        flag_track=flag_track,
+        flag_visualize=flag_visualize
     )
     generator.execute()
 
