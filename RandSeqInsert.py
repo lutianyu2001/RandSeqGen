@@ -821,8 +821,8 @@ class SequenceNode:
                     end_preview = node.content[-VIZ_SEQ_PREVIEW_LENGTH:]
                 
                 # 计算可用宽度，确保不超出最大宽度
-                available_width = max_width - len(indent) - len(str(start)) - len(str(end)) - \
-                                 len(start_preview) - len(end_preview) - len(node_type) - len(str(node.length)) - 20
+                available_width = (max_width - len(indent) - len(str(start)) - len(str(end)) - 
+                                   len(start_preview) - len(end_preview) - len(node_type) - len(str(node.length)) - 20)
                 
                 # 确保available_width不为负数
                 available_width = max(1, available_width)
@@ -836,20 +836,20 @@ class SequenceNode:
                 # 生成节点可视化行，确保其不超过最大宽度
                 line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
                 
-                # 如果行太长，截断符号
+                # 如果行太长，使用最大宽度并添加 ">>>" 提示符
                 if len(line) > max_width:
-                    excess = len(line) - max_width + 3  # +3 为了添加"..."
-                    symbols_new_length = max(1, symbols_count - excess // 2)
-                    symbols = "=" * symbols_new_length if node_type == "SEQ" else "-" * symbols_new_length
-                    line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
-                    if len(line) > max_width:
-                        line = line[:max_width-3] + "..."
+                    excess = len(line) - max_width + 3  # 为 ">>>" 预留空间
+                    symbols_count = max(1, symbols_count - excess // 2)
+                    symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
+                    
+                    # 重新生成行，用 ">>>" 替代结尾的 "|"
+                    line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} >>>"
                 
                 print(line, file=output_file)
             
-            print("", file=output_file)
+            print(file=output_file)
             print("-" * max_width, file=output_file)
-            print("", file=output_file)
+            print(file=output_file)
 
 
 class SeqGenerator:
