@@ -381,66 +381,39 @@ class SequenceNode:
         if self.right:
             self.right.__collect_content(result)
     
-    def collect_refs(self, seq_id: str, abs_position: int = 0, is_seq_ref: bool = False):
+    def collect_refs(self, seq_id: str, abs_position: int = 0):
         """
-        收集参考序列节点并计算它们的绝对位置。
-        支持嵌套参考序列的完整记录。
+        Collect reference nodes and calculate their absolute positions.
         
         Args:
-            seq_id (str): 原始序列的ID
-            abs_position (int): 当前在连接序列中的绝对位置
-            is_seq_ref (bool): 当前节点是否为输入序列的参考序列（非嵌套参考序列）
+            seq_id (str): ID of the original sequence
+            abs_position (int): Current absolute position in the concatenated sequence
         
         Returns:
-            Tuple[List[SeqRecord], int]: 包含以下内容的元组:
-                - 参考序列记录列表
-                - 此子树的总长度
+            Tuple[List[SeqRecord], int]: A tuple containing:
+                - List of reference records
+                - The total length of this subtree
         """
         ref_records = []
         
         left_length = 0
         if self.left:
-            # 传递嵌套状态：如果当前节点是参考序列，则子节点是嵌套的
-            left_refs, left_length = self.left.collect_refs(seq_id, abs_position, 
-                                                           is_seq_ref or self.is_reference)
+            left_refs, left_length = self.left.collect_refs(seq_id, abs_position)
             ref_records.extend(left_refs)
         
         current_position = abs_position + left_length
         
         if self.is_reference:
-            # 获取完整序列内容（包括所有嵌套序列）
-            complete_content = str(self)
-            
-            # 创建具有绝对位置的参考记录
+            # Create a reference record with absolute position
             start_index = current_position
             end_index = start_index + self.length
-            
-            # 确定序列类型标识
-            type_tag = ""
-            if not is_seq_ref:  # 如果是输入序列的直接参考序列，不添加标识
-                type_tag = ""
-            else:
-                # 检查是插入序列还是目标序列（通过查看子节点）
-                is_target = (self.left and self.left.is_reference) or (self.right and self.right.is_reference)
-                is_insert = not is_target
-                
-                if is_target:
-                    type_tag = "_TS"  # 目标序列标识
-                if is_insert:
-                    type_tag = "_IS"  # 插入序列标识
-            
-            ref_id = f"{seq_id}_{start_index}_{end_index}{type_tag}-+-{self.length}"
-            
-            # 为嵌套参考序列使用完整内容，为直接参考序列使用节点内容
-            content_to_use = complete_content if is_seq_ref and type_tag == "_TS" else self.content
-            ref_record = create_sequence_record(content_to_use, ref_id)
+            ref_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
+            ref_record = create_sequence_record(self.content, ref_id)
             ref_records.append(ref_record)
         
         right_length = 0
         if self.right:
-            # 传递嵌套状态
-            right_refs, right_length = self.right.collect_refs(seq_id, current_position + self.length, 
-                                                              is_seq_ref or self.is_reference)
+            right_refs, right_length = self.right.collect_refs(seq_id, current_position + self.length)
             ref_records.extend(right_refs)
         
         return ref_records, left_length + self.length + right_length
