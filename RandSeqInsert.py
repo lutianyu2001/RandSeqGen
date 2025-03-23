@@ -21,18 +21,18 @@ import time
 
 VERSION = "v0.1.0"
 INFO = ("by Tianyu (Sky) Lu (tlu83@wisc.edu)\n"
-        "")
+        "WARN: Visualization part is not fully functional and has bugs")
 
 # PRE-DEFINED PARAMETERS
 NUCLEOTIDES = ["A", "T", "G", "C"]
 DEFAULT_ALLOCATED_CPU_CORES = os.cpu_count() - 2 if os.cpu_count() > 2 else 1
 DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqInsert-Result"
 
-# 可视化参数
-VIZ_MAX_WIDTH = 80  # 可视化输出的最大宽度（字符数）
-VIZ_SEQ_PREVIEW_LENGTH = 4  # 在可视化中显示序列内容的前后碱基数量
-VIZ_PAGE_SIZE_FACTOR = 25  # 每页显示的序列长度 = VIZ_MAX_WIDTH * VIZ_PAGE_SIZE_FACTOR
-VIZ_MAX_SYMBOLS = 40  # 序列可视化符号的最大数量
+# Visualization parameters
+VIZ_MAX_WIDTH = 80  # Maximum width of visualization output (in characters)
+VIZ_SEQ_PREVIEW_LENGTH = 4  # Number of bases to show at start/end in sequence visualization
+VIZ_PAGE_SIZE_FACTOR = 25  # Sequence length per page = VIZ_MAX_WIDTH * VIZ_PAGE_SIZE_FACTOR
+VIZ_MAX_SYMBOLS = 40  # Maximum number of symbols for sequence visualization
 
 PROGRAM_ROOT_DIR_ABS_PATH = os.path.dirname(__file__)
 DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_PATH)
@@ -418,7 +418,10 @@ class SequenceNode:
         
         return ref_records, left_length + self.length + right_length
     
-    def _create_node_info(self, current_position: int) -> tuple:
+    # ==================================================================================================================
+    # Tree Visualization
+
+    def __create_node_info(self, current_position: int) -> tuple:
         """
         Create node information.
         
@@ -448,7 +451,7 @@ class SequenceNode:
         
         return node_label, node_width, node_line
     
-    def _create_node_box(self, node_line: str, node_width: int) -> list:
+    def __create_node_box(self, node_line: str, node_width: int) -> list:
         """
         Create a node box.
         
@@ -465,7 +468,7 @@ class SequenceNode:
             "└" + "─" * (node_width - 2) + "┘"
         ]
     
-    def _create_leaf_visual(self, node_width: int, node_line: str) -> tuple:
+    def __create_leaf_visual(self, node_width: int, node_line: str) -> tuple:
         """
         Create visual representation for a leaf node.
         
@@ -476,10 +479,10 @@ class SequenceNode:
         Returns:
             tuple: Contains list of strings representing the visual, node length, and height
         """
-        result = self._create_node_box(node_line, node_width)
+        result = self.__create_node_box(node_line, node_width)
         return result, self.length, 1
     
-    def _create_fork_line(self, parent_center: int, left_conn_pos: int, right_conn_pos: int, total_width: int) -> str:
+    def __create_fork_line(self, parent_center: int, left_conn_pos: int, right_conn_pos: int, total_width: int) -> str:
         """
         Create a fork line connecting two child nodes.
         
@@ -532,7 +535,7 @@ class SequenceNode:
         # Add padding to match total width
         return fork_line.ljust(total_width)
     
-    def _align_child_trees(self, left_lines: list, right_lines: list, left_box_width: int, right_box_width: int, 
+    def __align_child_trees(self, left_lines: list, right_lines: list, left_box_width: int, right_box_width: int, 
                           right_box_pos: int, total_width: int) -> list:
         """
         Align and merge left and right subtree visualizations.
@@ -572,7 +575,7 @@ class SequenceNode:
             
         return result
     
-    def _create_single_child_connector(self, parent_center: int, child_center: int, is_left_child: bool, 
+    def __create_single_child_connector(self, parent_center: int, child_center: int, is_left_child: bool, 
                                       total_width: int) -> str:
         """
         Create a connector line to a single child node.
@@ -635,18 +638,18 @@ class SequenceNode:
             right_lines, right_length, right_height = self.right.generate_tree_visual(current_position + self.length)
         
         # Create node information
-        node_label, node_width, node_line = self._create_node_info(current_position)
+        node_label, node_width, node_line = self.__create_node_info(current_position)
         
         # Calculate this subtree height
         height = max(left_height, right_height) + 1
         
         # Handle leaf node case
         if not self.left and not self.right:
-            return self._create_leaf_visual(node_width, node_line)
+            return self.__create_leaf_visual(node_width, node_line)
         
         # Handle nodes with children
         # Create node box
-        result = self._create_node_box(node_line, node_width)
+        result = self.__create_node_box(node_line, node_width)
         
         # Calculate subtree width
         left_box_width = len(left_lines[0]) if left_lines else 0
@@ -669,11 +672,11 @@ class SequenceNode:
             right_conn_pos = right_box_pos + right_child_center
             
             # Create and add fork line
-            fork_line = self._create_fork_line(parent_center, left_conn_pos, right_conn_pos, total_width)
+            fork_line = self.__create_fork_line(parent_center, left_conn_pos, right_conn_pos, total_width)
             result.append(fork_line)
             
             # Add and align child trees
-            child_lines = self._align_child_trees(
+            child_lines = self.__align_child_trees(
                 left_lines, right_lines, left_box_width, right_box_width, right_box_pos, total_width)
             result.extend(child_lines)
             
@@ -683,7 +686,7 @@ class SequenceNode:
             total_width = max(node_width, left_box_width)
             
             # Create connection line
-            connector = self._create_single_child_connector(parent_center, left_child_center, True, total_width)
+            connector = self.__create_single_child_connector(parent_center, left_child_center, True, total_width)
             result.append(connector)
             
             # Add left subtree, ensure width consistency
@@ -699,7 +702,7 @@ class SequenceNode:
             right_tree_center = right_offset + right_child_center
             
             # Create connection line
-            connector = self._create_single_child_connector(parent_center, right_tree_center, False, total_width)
+            connector = self.__create_single_child_connector(parent_center, right_tree_center, False, total_width)
             result.append(connector)
             
             # Add right subtree, ensure correct alignment and width
@@ -708,141 +711,144 @@ class SequenceNode:
         
         return result, left_length + self.length + right_length, height
 
-    def collect_sequence_structure(self, abs_position=0):
+    # ==================================================================================================================
+    # Sequence Visualization
+
+    def __collect_sequence_structure(self, abs_position=0):
         """
-        收集序列结构信息，用于可视化
+        Collect sequence structure information for visualization
         
         Args:
-            abs_position (int): 节点在完整序列中的绝对起始位置
+            abs_position (int): Absolute start position of the node in the complete sequence
             
         Returns:
-            list: 包含(节点，起始位置，结束位置，深度)元组的列表
+            list: List of tuples containing (node, start_position, end_position, depth)
         """
         result = []
         
-        # 处理左子树
+        # Process left subtree
         if self.left:
-            result.extend(self.left.collect_sequence_structure(abs_position))
+            result.extend(self.left.__collect_sequence_structure(abs_position))
         
-        # 计算当前节点位置
+        # Calculate current node position
         left_length = self.left.total_length if self.left else 0
         start_pos = abs_position + left_length
         end_pos = start_pos + self.length - 1
         
-        # 添加当前节点
+        # Add current node
         result.append((self, start_pos, end_pos, 0))
         
-        # 处理右子树
+        # Process right subtree
         if self.right:
             right_pos = start_pos + self.length
-            result.extend(self.right.collect_sequence_structure(right_pos))
+            result.extend(self.right.__collect_sequence_structure(right_pos))
         
         return result
     
-    def create_sequence_visualization(self, output_file, max_width=80, seq_id=None):
+    def generate_sequence_visual(self, output_file, max_width=80, seq_id=None):
         """
-        创建整个序列的可视化展示
+        Create visualization of the entire sequence
         
         Args:
-            output_file: 输出文件对象
-            max_width (int): 输出的最大宽度
-            seq_id (str): 序列ID
+            output_file: Output file object
+            max_width (int): Maximum width of output
+            seq_id (str): Sequence ID
         """
-        # 收集序列结构信息
-        structure = self.collect_sequence_structure()
+        # Collect sequence structure information
+        structure = self.__collect_sequence_structure()
         
-        # 按照位置排序
+        # Sort by position
         structure.sort(key=lambda x: (x[1], -x[2]))
         
-        # 计算嵌套深度
+        # Calculate nesting depth
         node_depths = {}
         for i, (node, start, end, _) in enumerate(structure):
-            # 查找该节点的所有父节点
+            # Find all parent nodes for this node
             depth = 0
             for parent_node, parent_start, parent_end, _ in structure:
                 if parent_node != node and parent_start <= start and parent_end >= end:
                     depth += 1
-            # 更新节点深度
+            # Update node depth
             structure[i] = (node, start, end, depth)
         
-        # 输出可视化
-        total_length = structure[-1][2] + 1  # 最后一个节点的结束位置 + 1
+        # Output visualization
+        total_length = structure[-1][2] + 1  # Last node end position + 1
         
-        # 确定每页的长度范围 - 使用全局常量来动态计算
-        page_size = max_width * VIZ_PAGE_SIZE_FACTOR  # 动态计算每页显示的序列长度
+        # Determine length range for each page - using global constants for dynamic calculation
+        page_size = max_width * VIZ_PAGE_SIZE_FACTOR  # Dynamically calculate sequence length per page
         page_count = (total_length + page_size - 1) // page_size
         
         for page in range(page_count):
             page_start = page * page_size
             page_end = min((page + 1) * page_size - 1, total_length - 1)
             
-            # 计算当前页的长度
+            # Calculate current page length
             current_page_length = page_end - page_start + 1
             
-            # 打印页标题
+            # Print page title
             if page_count > 1:
-                print(f"序列部分 {page+1}/{page_count}: 位置 {page_start}-{page_end}", file=output_file)
+                print(f"Sequence section {page+1}/{page_count}: Positions {page_start}-{page_end}", file=output_file)
                 print("-" * max_width, file=output_file)
                 print(file=output_file)
             
-            # 筛选当前页范围内的节点
+            # Filter nodes within current page range
             page_nodes = [(node, start, end, depth) for node, start, end, depth in structure 
                          if not (end < page_start or start > page_end)]
             
-            # 对于每个节点，生成其可视化行
+            # Generate visualization line for each node
             for node, start, end, depth in page_nodes:
-                # 计算在页面中的起始和结束位置
+                # Calculate start and end positions on page
                 vis_start = max(start, page_start)
                 vis_end = min(end, page_end)
                 
-                # 计算节点在当前页中的可见长度
+                # Calculate visible node length on current page
                 visible_length = vis_end - vis_start + 1
                 
-                # 计算节点可见长度占当前页长度的百分比
+                # Calculate percentage of page length occupied by node
                 length_percentage = visible_length / current_page_length
                 
-                # 缩进显示嵌套关系
+                # Indent to show nesting relationship
                 indent = "  " * depth
                 
-                # 确定节点类型
+                # Determine node type
                 node_type = "REF" if node.is_reference else "SEQ"
                 
-                # 获取序列预览 - 修复短序列问题
+                # Get sequence preview - fix short sequence issue
                 if len(node.content) <= VIZ_SEQ_PREVIEW_LENGTH * 2:
-                    # 如果序列很短，仅显示一半内容在开始和结束
+                    # For short sequences, display half content at start and end
                     preview_length = len(node.content) // 2
-                    if preview_length == 0:  # 处理极短序列
+                    if preview_length == 0:  # Handle extremely short sequences
                         preview_length = 1 if len(node.content) > 0 else 0
                     start_preview = node.content[:preview_length]
                     end_preview = node.content[-preview_length:] if preview_length > 0 else ""
                 else:
-                    # 正常情况
+                    # Normal case
                     start_preview = node.content[:VIZ_SEQ_PREVIEW_LENGTH]
                     end_preview = node.content[-VIZ_SEQ_PREVIEW_LENGTH:]
                 
-                # 计算可用宽度，确保不超出最大宽度
+                # Calculate available width, ensure it doesn't exceed maximum width
                 available_width = (max_width - len(indent) - len(str(start)) - len(str(end)) - 
                                    len(start_preview) - len(end_preview) - len(node_type) - len(str(node.length)) - 20)
                 
-                # 确保available_width不为负数
+                # Ensure available_width is not negative
                 available_width = max(1, available_width)
                 
-                # 基于百分比和可用宽度计算符号数量，使用全局常量限制
+                # Calculate number of symbols based on percentage and available width, using global constant limit
                 symbols_count = max(1, min(available_width, int(length_percentage * VIZ_MAX_SYMBOLS)))
                 
-                # 使用不同的符号表示不同类型的节点
+                # Use different symbols for different node types
                 symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
                 
-                # 生成节点可视化行，确保其不超过最大宽度
+                # Generate node visualization line, ensure it doesn't exceed maximum width
                 line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
                 
-                # 如果行太长，使用最大宽度并添加 ">>>" 提示符
+                # If line is too long, use maximum width and add ">>>" indicator
                 if len(line) > max_width:
-                    excess = len(line) - max_width + 3  # 为 ">>>" 预留空间
+                    excess = len(line) - max_width + 3  # Reserve space for ">>>"
                     symbols_count = max(1, symbols_count - excess // 2)
                     symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
                     
-                    # 重新生成行，用 ">>>" 替代结尾的 "|"
+                    # Regenerate line, replace ending "|" with ">>>"
                     line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} >>>"
                 
                 print(line, file=output_file)
@@ -850,6 +856,8 @@ class SequenceNode:
             print(file=output_file)
             print("-" * max_width, file=output_file)
             print(file=output_file)
+
+    # ==================================================================================================================
 
 
 class SeqGenerator:
@@ -950,12 +958,12 @@ class SeqGenerator:
                 metadata = {'iteration': i + 1, 'rel_pos': pos}
                 root = root.insert(pos, ref_seq, metadata)
         
-        # 最终生成序列
+        # Generate final sequence
         final_seq = str(root)
         new_id = f"{seq_record.id}_iter{self.iteration}_ins{self.insertion}"
         new_seq_record = create_sequence_record(final_seq, new_id)
         
-        # 生成可视化（如果启用）
+        # Generate visualization (if enabled)
         if self.flag_visualize:
             self.visualize_sequence(seq_record.id, root, self.output_dir)
         
@@ -965,7 +973,7 @@ class SeqGenerator:
             used_refs, _ = root.collect_refs(seq_record.id)
             return new_seq_record, used_refs, root
         
-        # 如果启用可视化，返回根节点
+        # If visualization is enabled, return root node
         if self.flag_visualize:
             return new_seq_record, used_refs, root
         
@@ -1140,19 +1148,29 @@ class SeqGenerator:
             print(f"Saving {len(references)} reference sequence records")
             output_dict[f"used_refs{suffix}.fasta"] = references
         
-        # 将树结构可视化保存移到flag_visualize条件下
-        if self.flag_visualize and tree_visuals:
+        if self.flag_visualize:
             print(f"Saving tree structure visualizations")
-            tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
-            with open(tree_file_path, 'w', encoding='utf-8') as tree_file:
-                for seq_id, lines in tree_visuals.items():
-                    tree_file.write(f"=== Tree Structure Visualization: {seq_id} ===\n")
-                    tree_file.write("Node Format: Type|Start-End|Length[Metadata]\n")
-                    tree_file.write("SEQ: Original sequence node, REF: Inserted reference sequence node\n\n")
-                    tree_file.write("\n".join(lines))
-                    tree_file.write("\n\n" + "="*80 + "\n\n")
+            self.__save_tree_structure_visualization(output_dir, tree_visuals, suffix)
         
         save_multi_fasta_from_dict(output_dict, output_dir)
+        
+    def __save_tree_structure_visualization(self, output_dir: str, tree_visuals: Dict[str, List[str]], suffix: str = ""):
+        """
+        Save tree structure visualizations to a file.
+        
+        Args:
+            output_dir (str): Directory to save the visualization file
+            tree_visuals (Dict[str, List[str]]): Dictionary mapping sequence IDs to tree visualization lines
+            suffix (str): Suffix to add to the output filename
+        """
+        tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
+        with open(tree_file_path, 'w', encoding='utf-8') as tree_file:
+            for seq_id, lines in tree_visuals.items():
+                tree_file.write(f"=== Tree Structure Visualization: {seq_id} ===\n")
+                tree_file.write("Node Format: Type|Start-End|Length[Metadata]\n")
+                tree_file.write("SEQ: Original sequence node, REF: Inserted reference sequence node\n\n")
+                tree_file.write("\n".join(lines))
+                tree_file.write("\n\n" + "="*80 + "\n\n")
 
     def __print_header(self):
         """
@@ -1204,34 +1222,33 @@ class SeqGenerator:
 
     def visualize_sequence(self, seq_id, root_node, output_dir):
         """
-        为指定序列创建可视化文件
+        Create visualization file for specified sequence
         
         Args:
-            seq_id (str): 序列ID
-            root_node (SequenceNode): 序列的根节点
-            output_dir (str): 输出目录
+            seq_id (str): Sequence ID
+            root_node (SequenceNode): Root node of the sequence
+            output_dir (str): Output directory
         """
-        # 创建可视化文件目录
+        # Create visualization directory
         viz_dir = os.path.join(output_dir, "seq_visualization")
         os.makedirs(viz_dir, exist_ok=True)
         
-        # 创建可视化文件
+        # Create visualization file
         viz_filename = f"{seq_id}_visualization.txt"
         viz_path = os.path.join(viz_dir, viz_filename)
         
         with open(viz_path, 'w') as f:
-            # 添加标题
-            f.write(f"序列可视化: {seq_id}\n")
+            # Add title
+            f.write(f"Sequence Visualization: {seq_id}\n")
             f.write("="*VIZ_MAX_WIDTH + "\n\n")
-            f.write("说明:\n")
-            f.write("- SEQ: 原始序列节点\n")
-            f.write("- REF: 插入的参考序列节点\n")
-            f.write("- 数字表示序列在完整序列中的位置\n")
-            f.write(f"- 左右两侧显示序列的实际内容（前后各{VIZ_SEQ_PREVIEW_LENGTH}个碱基）\n")
-            f.write("- 缩进表示嵌套层级\n\n")
+            f.write("Legend:\n")
+            f.write("- SEQ: Original sequence node\n")
+            f.write("- REF: Inserted reference sequence node\n")
+            f.write("- Numbers represent sequence positions in the complete sequence\n")
+            f.write(f"- Left and right sides show actual sequence content (first and last {VIZ_SEQ_PREVIEW_LENGTH} bases)\n")
+            f.write("- Indentation shows nesting level\n\n")
             f.write("="*VIZ_MAX_WIDTH + "\n\n")
             
-            # 使用新的可视化方法
             root_node.create_sequence_visualization(f, max_width=VIZ_MAX_WIDTH, seq_id=seq_id)
 
 
