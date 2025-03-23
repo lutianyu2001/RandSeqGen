@@ -381,106 +381,69 @@ class SequenceNode:
         if self.right:
             self.right.__collect_content(result)
     
-    def collect_refs(self, seq_id: str, abs_position: int = 0):
+    def collect_refs(self, seq_id: str, abs_position: int = 0, is_seq_ref: bool = False):
         """
-        Collect reference nodes and calculate their absolute positions.
+        收集参考序列节点并计算它们的绝对位置。
+        支持嵌套参考序列的完整记录。
         
         Args:
-            seq_id (str): ID of the original sequence
-            abs_position (int): Current absolute position in the concatenated sequence
+            seq_id (str): 原始序列的ID
+            abs_position (int): 当前在连接序列中的绝对位置
+            is_seq_ref (bool): 当前节点是否为输入序列的参考序列（非嵌套参考序列）
         
         Returns:
-            Tuple[List[SeqRecord], Dict[int, SequenceNode], int]: A tuple containing:
-                - List of reference records
-                - Dictionary mapping positions to nodes (for nested structure tracking)
-                - The total length of this subtree
+            Tuple[List[SeqRecord], int]: 包含以下内容的元组:
+                - 参考序列记录列表
+                - 此子树的总长度
         """
         ref_records = []
-        position_node_map = {}  # 映射位置到节点
         
         left_length = 0
-        left_node_map = {}
         if self.left:
-            left_refs, left_node_map, left_length = self.left.collect_refs(seq_id, abs_position)
+            # 传递嵌套状态：如果当前节点是参考序列，则子节点是嵌套的
+            left_refs, left_length = self.left.collect_refs(seq_id, abs_position, 
+                                                           is_seq_ref or self.is_reference)
             ref_records.extend(left_refs)
-            position_node_map.update(left_node_map)
         
         current_position = abs_position + left_length
         
         if self.is_reference:
-            # 记录当前节点位置
+            # 获取完整序列内容（包括所有嵌套序列）
+            complete_content = str(self)
+            
+            # 创建具有绝对位置的参考记录
             start_index = current_position
             end_index = start_index + self.length
-            position_node_map[start_index] = self
+            
+            # 确定序列类型标识
+            type_tag = ""
+            if not is_seq_ref:  # 如果是输入序列的直接参考序列，不添加标识
+                type_tag = ""
+            else:
+                # 检查是插入序列还是目标序列（通过查看子节点）
+                is_target = (self.left and self.left.is_reference) or (self.right and self.right.is_reference)
+                is_insert = not is_target
+                
+                if is_target:
+                    type_tag = "_TS"  # 目标序列标识
+                if is_insert:
+                    type_tag = "_IS"  # 插入序列标识
+            
+            ref_id = f"{seq_id}_{start_index}_{end_index}{type_tag}-+-{self.length}"
+            
+            # 为嵌套参考序列使用完整内容，为直接参考序列使用节点内容
+            content_to_use = complete_content if is_seq_ref and type_tag == "_TS" else self.content
+            ref_record = create_sequence_record(content_to_use, ref_id)
+            ref_records.append(ref_record)
         
         right_length = 0
-        right_node_map = {}
         if self.right:
-            right_refs, right_node_map, right_length = self.right.collect_refs(seq_id, current_position + self.length)
+            # 传递嵌套状态
+            right_refs, right_length = self.right.collect_refs(seq_id, current_position + self.length, 
+                                                              is_seq_ref or self.is_reference)
             ref_records.extend(right_refs)
-            position_node_map.update(right_node_map)
         
-        # 第一次遍历完节点树后, 返回引用记录列表、位置节点映射和总长度
-        return ref_records, position_node_map, left_length + self.length + right_length
-    
-    def construct_nested_refs(self, seq_id: str, abs_position: int = 0):
-        """
-        构建包含嵌套关系的引用序列记录。
-        
-        Args:
-            seq_id (str): 原始序列ID
-            abs_position (int): 当前节点在串联序列中的绝对位置
-        
-        Returns:
-            Tuple[List[SeqRecord], int]: 包含:
-                - 引用记录列表
-                - 子树总长度
-        """
-        # 第一步：收集所有引用节点并映射到其位置
-        _, position_node_map, total_length = self.collect_refs(seq_id, abs_position)
-        
-        # 第二步：对映射排序，生成包含嵌套的引用序列
-        nested_records = []
-        
-        # 按位置排序节点（从后向前）
-        sorted_positions = sorted(position_node_map.keys(), reverse=True)
-        
-        for pos in sorted_positions:
-            node = position_node_map[pos]
-            start_index = pos
-            end_index = start_index + node.length
-            
-            # 从节点获取完整内容（包含嵌套序列）
-            content = str(node)
-            
-            # 构建新的ID，包含IS标识
-            ref_id = f"{seq_id}_{start_index}_{end_index}-+-{node.length}-+-IS"
-            
-            # 检查该节点是否也是TS（被其他序列插入）
-            is_ts = False
-            for other_pos in sorted_positions:
-                if other_pos != pos:  # 不是自己
-                    other_node = position_node_map[other_pos]
-                    # 如果当前节点位置在其他节点的范围内
-                    if other_pos < start_index < other_pos + other_node.length:
-                        is_ts = True
-                        break
-            
-            # 如果是TS，添加TS标识
-            if is_ts:
-                ref_id = f"{seq_id}_{start_index}_{end_index}-+-{node.length}-+-IS-+-TS"
-            
-            # 创建记录
-            ref_record = create_sequence_record(content, ref_id)
-            nested_records.append(ref_record)
-        
-        # 最后添加整个序列作为TS
-        full_seq = str(self)
-        full_id = f"{seq_id}_0_{len(full_seq)}-+-{len(full_seq)}-+-TS"
-        full_record = create_sequence_record(full_seq, full_id)
-        nested_records.append(full_record)
-        
-        return nested_records, total_length
+        return ref_records, left_length + self.length + right_length
     
     def _create_node_info(self, current_position: int) -> tuple:
         """
@@ -1026,7 +989,7 @@ class SeqGenerator:
         # Only collect reference sequences if tracking is enabled
         used_refs = None
         if self.flag_track:
-            used_refs, _ = root.construct_nested_refs(seq_record.id)
+            used_refs, _ = root.collect_refs(seq_record.id)
             return new_seq_record, used_refs, root
         
         # 如果启用可视化，返回根节点
