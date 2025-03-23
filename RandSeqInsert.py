@@ -270,6 +270,10 @@ class SequenceNode:
         self.right = None
         # Total length of the subtree for efficient traversal
         self.total_length = self.length
+        # 新增：是否包含嵌套的参考序列
+        self.has_nested_refs = False
+        # 新增：是否是嵌套在其他参考序列中的序列
+        self.is_nested = False
     
     def __update_total_length(self):
         """
@@ -283,77 +287,75 @@ class SequenceNode:
         self.total_length = left_length + self.length + right_length
     
     def insert(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
-        """
-        Insert a reference sequence at the absolute position in the tree.
-        
-        Args:
-            abs_position (int): Absolute position in the tree to insert at
-            ref_seq (str): Reference sequence to insert
-            ref_metadata: Metadata for the reference
-            
-        Returns:
-            SequenceNode: Root node after insertion
-        """
-        # Calculate positions in tree
+        """插入参考序列到树结构中"""
+        # 计算树中的位置
         left_length = self.left.total_length if self.left else 0
         
-        # Fast path: Position is before this node
+        # 位置在当前节点前
         if abs_position <= left_length:
             if self.left:
                 self.left = self.left.insert(abs_position, ref_seq, ref_metadata)
             else:
-                # Insert as left child
+                # 插入为左子节点
                 self.left = SequenceNode(ref_seq, True, ref_metadata)
             self.__update_total_length()
             return self
         
-        # Position is within this node
+        # 位置在当前节点内
         node_start = left_length
         node_end = node_start + self.length
         
-        # Fast path: Position is within this node
         if node_start < abs_position < node_end:
-            # Split this node
+            # 分割当前节点
             rel_pos = abs_position - node_start
             left_content = self.content[:rel_pos]
             right_content = self.content[rel_pos:]
             
-            # Create new left child with left content
+            # 创建左子节点
             new_left = SequenceNode(left_content, self.is_reference, self.metadata)
             if self.left:
                 new_left.left = self.left
                 new_left.__update_total_length()
             
-            # Create new right child with right content and original right child
+            # 创建右子节点
             new_right = SequenceNode(right_content, self.is_reference, self.metadata)
             if self.right:
                 new_right.right = self.right
                 new_right.__update_total_length()
             
-            # Replace this node's content with the reference
+            # 替换当前节点内容为参考序列
             self.content = ref_seq
-            self.length = len(ref_seq)
             self.is_reference = True
             self.metadata = ref_metadata
             
-            # Set new children
+            # 设置新子节点
             self.left = new_left
             self.right = new_right
-            self.__update_total_length()
             
+            # 新增：如果这是参考序列的嵌套插入
+            if new_left.is_reference or new_right.is_reference:
+                self.has_nested_refs = True
+                # 标记被嵌套的子节点
+                if new_left.is_reference:
+                    new_left.is_nested = True
+                if new_right.is_reference:
+                    new_right.is_nested = True
+                
+            self.__update_total_length()
             return self
         
-        # Fast path: Position is after this node
+        # 位置在当前节点后
         if abs_position >= node_end:
             if self.right:
                 self.right = self.right.insert(abs_position - node_end, ref_seq, ref_metadata)
             else:
-                # Insert as right child
+                # 插入为右子节点
                 self.right = SequenceNode(ref_seq, True, ref_metadata)
             self.__update_total_length()
             return self
         
-        return self  # Should not reach here
+        # return self  # Should not reach here
+        raise RuntimeError("Should not reach here")
     
     def __str__(self) -> str:
         """
@@ -383,16 +385,15 @@ class SequenceNode:
     
     def collect_refs(self, seq_id: str, abs_position: int = 0):
         """
-        Collect reference nodes and calculate their absolute positions.
+        收集参考节点并计算它们的绝对位置。
+        修改版本支持IS/TS命名和嵌套序列内容保存。
         
         Args:
-            seq_id (str): ID of the original sequence
-            abs_position (int): Current absolute position in the concatenated sequence
+            seq_id (str): 原始序列ID
+            abs_position (int): 连接序列中的当前绝对位置
         
         Returns:
-            Tuple[List[SeqRecord], int]: A tuple containing:
-                - List of reference records
-                - The total length of this subtree
+            Tuple[List[SeqRecord], int]: 包含参考记录和子树总长度的元组
         """
         ref_records = []
         
@@ -404,11 +405,35 @@ class SequenceNode:
         current_position = abs_position + left_length
         
         if self.is_reference:
-            # Create a reference record with absolute position
+            # 获取完整序列内容（包括嵌套的参考序列）
+            full_content = str(self)
+            
+            # 创建参考记录，带有标记
             start_index = current_position
             end_index = start_index + self.length
-            ref_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
-            ref_record = create_sequence_record(self.content, ref_id)
+            
+            # 确定是IS还是TS
+            sequence_type = ""
+            if self.has_nested_refs:
+                sequence_type = "TS"
+            elif self.is_nested:
+                sequence_type = "IS"
+            
+            # 创建记录ID
+            # 如果是插入到原始序列的参考序列，使用原始格式
+            if seq_id in full_content and not sequence_type:
+                ref_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
+            else:
+                # 为嵌套参考序列添加IS/TS标记
+                ref_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
+                if sequence_type:
+                    ref_id = f"{ref_id}_{sequence_type}"
+            
+            # 为TS类型使用完整内容（包括嵌套序列）
+            # 对于IS类型或普通参考，使用当前节点内容
+            content_to_use = full_content if sequence_type == "TS" else self.content
+            
+            ref_record = create_sequence_record(content_to_use, ref_id)
             ref_records.append(ref_record)
         
         right_length = 0
