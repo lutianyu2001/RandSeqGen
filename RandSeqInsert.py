@@ -444,6 +444,9 @@ class SequenceNode:
         if self.metadata and self.is_reference:
             metadata_str = f" [iter:{self.metadata.get('iteration', '?')},pos:{self.metadata.get('rel_pos', '?')}]"
         
+        # Node content (truncated if too long)
+        content_str = self.content[:10] + "..." if len(self.content) > 10 else self.content
+        
         # Format node label
         node_label = f"{node_type}|{current_position}-{end_position}|{self.length}{metadata_str}"
         
@@ -456,66 +459,78 @@ class SequenceNode:
         # Prepare result lines for this node and its subtrees
         result = []
         
-        # Simplified node box representation
-        node_box = [
-            "┌" + "─" * (node_width - 2) + "┐",
-            "│" + node_line + "│",
-            "└" + "─" * (node_width - 2) + "┘"
-        ]
+        # Calculate height of this subtree
+        height = max(left_height, right_height) + 1
         
         # Handle leaf node case
         if not self.left and not self.right:
-            return node_box, self.length, 1
+            result.append("┌" + "─" * (node_width - 2) + "┐")
+            result.append("│" + node_line + "│")
+            result.append("└" + "─" * (node_width - 2) + "┘")
+            return result, self.length, 1
         
-        # Standard prefix for child nodes
-        prefix_space = "    "
-        connection = "│   "
+        # Handle nodes with children
+        # Calculate space needed for aligning children
+        left_width = len(left_lines[0]) if left_lines else 0
+        right_width = len(right_lines[0]) if right_lines else 0
         
-        # Build result with a clear hierarchical structure
+        # Add more space to distinguish left and right subtrees
+        spacing = 6  # Extra spacing between left and right subtrees
+        
+        # Node box top
+        result.append("┌" + "─" * (node_width - 2) + "┐")
+        result.append("│" + node_line + "│")
+        result.append("└" + "─" * (node_width - 2) + "┘")
+        
+        # Add connecting lines to children
         if self.left and self.right:
-            # Both children exist - use a standard tree structure
-            # First add the current node
-            result.extend(node_box)
+            # Both children exist
+            # Connector line from this node to left and right children
+            connector_line = " " * ((node_width - 1) // 2) + "│" + " " * ((node_width - 1) // 2)
+            result.append(connector_line)
             
-            # Add connection to children
-            result.append("│")
-            result.append("├───┐")
+            left_side = (node_width - 1) // 2
+            right_side = node_width - left_side - 1
             
-            # Process left subtree
-            for i, line in enumerate(left_lines):
-                if i == 0:
-                    # First line connects to the branch
-                    result.append("│   " + line)
+            # Build fork for left and right branches
+            fork_line = " " * (left_side - 1) + "┌" + "┴" + "┐" + " " * (right_side - 1)
+            result.append(fork_line)
+            
+            # Add vertical connection extensions
+            left_conn = " " * (left_side - 1) + "│" + " " * (node_width - left_side)
+            right_conn = " " * (node_width - right_side) + "│" + " " * (right_side - 1)
+            result.append(left_conn)
+            result.append(right_conn)
+            
+            # Merge left and right subtrees
+            for i in range(max(len(left_lines), len(right_lines))):
+                if i < len(left_lines):
+                    left_part = left_lines[i]
                 else:
-                    result.append("│   " + line)
-            
-            # Add connection to right subtree
-            result.append("│")
-            result.append("└───┐")
-            
-            # Process right subtree
-            for line in right_lines:
-                result.append("    " + line)
-            
+                    left_part = " " * left_width
+                    
+                if i < len(right_lines):
+                    right_part = right_lines[i]
+                else:
+                    right_part = " " * right_width
+                    
+                result.append(left_part + " " * spacing + right_part)
+                
         elif self.left:
             # Only left child
-            result.extend(node_box)
-            result.append("│")
-            result.append("└───┐")
-            
-            # Add left subtree with proper indentation
+            connector = " " * ((node_width - 1) // 2) + "│" + " " * ((node_width - 1) // 2)
+            result.append(connector)
+            result.append(connector)  # Add extra connector line
             for line in left_lines:
-                result.append("    " + line)
+                result.append(" " * ((node_width - len(line)) // 2) + line)
                 
         elif self.right:
             # Only right child
-            result.extend(node_box)
-            result.append("│")
-            result.append("└───┐")
-            
-            # Add right subtree with proper indentation
+            connector = " " * ((node_width - 1) // 2) + "│" + " " * ((node_width - 1) // 2)
+            result.append(connector)
+            result.append(connector)  # Add extra connector line
             for line in right_lines:
-                result.append("    " + line)
+                result.append(" " * ((node_width - len(line)) // 2) + line)
         
         return result, left_length + self.length + right_length, height
 
