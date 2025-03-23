@@ -706,54 +706,132 @@ class SequenceNode:
         
         return result, left_length + self.length + right_length, height
         
-    def visualize(self, depth=0, prefix="", output_file=None, abs_position=0):
+    def visualize(self, depth=0, output_file=None, abs_position=0):
         """
         生成序列节点及其子节点的可视化表示
         
         Args:
             depth (int): 当前节点的嵌套深度
-            prefix (str): 行前缀，用于缩进
             output_file: 输出文件对象
             abs_position (int): 当前节点在完整序列中的绝对起始位置
         """
-        # 计算左侧节点的总长度
-        left_length = self.left.total_length if self.left else 0
+        # 这里的实现会被新方法替代，保留方法签名以兼容现有代码
+        pass
+    
+    def collect_sequence_structure(self, abs_position=0):
+        """
+        收集序列结构信息，用于可视化
         
-        # 计算当前节点在完整序列中的起始和结束位置
-        start_pos = abs_position
+        Args:
+            abs_position (int): 节点在完整序列中的绝对起始位置
+            
+        Returns:
+            list: 包含(节点，起始位置，结束位置，深度)元组的列表
+        """
+        result = []
+        
+        # 处理左子树
+        if self.left:
+            result.extend(self.left.collect_sequence_structure(abs_position))
+        
+        # 计算当前节点位置
+        left_length = self.left.total_length if self.left else 0
+        start_pos = abs_position + left_length
         end_pos = start_pos + self.length - 1
         
-        # 缩进显示嵌套关系
-        indent = "  " * depth
+        # 添加当前节点
+        result.append((self, start_pos, end_pos, 0))
         
-        # 确定节点类型
-        node_type = "REF" if self.is_reference else "SEQ"
-        
-        # 获取序列预览
-        start_preview = self.content[:VIZ_SEQ_PREVIEW_LENGTH]
-        end_preview = self.content[-VIZ_SEQ_PREVIEW_LENGTH:] if len(self.content) >= VIZ_SEQ_PREVIEW_LENGTH else self.content
-        
-        # 计算表示序列的符号数量（根据最大宽度调整）
-        available_width = VIZ_MAX_WIDTH - len(indent) - len(str(start_pos)) - len(str(end_pos)) - \
-                         len(start_preview) - len(end_preview) - len(node_type) - len(str(self.length)) - 20
-        
-        symbols_count = max(1, min(available_width, int(self.length / 10)))
-        symbols = "=" * symbols_count if node_type == "SEQ" else "-" * symbols_count
-        
-        # 生成节点可视化行
-        line = f"{indent}| {start_pos} {start_preview} {symbols} {node_type} ({self.length}) {symbols} {end_preview} {end_pos} |"
-        print(line, file=output_file)
-        
-        # 递归可视化左子树
-        if self.left:
-            self.left.visualize(depth + 1, prefix, output_file, abs_position)
-        
-        # 计算当前节点内容后的绝对位置（用于右子树）
-        right_pos = abs_position + (self.left.total_length if self.left else 0) + self.length
-        
-        # 递归可视化右子树
+        # 处理右子树
         if self.right:
-            self.right.visualize(depth + 1, prefix, output_file, right_pos)
+            right_pos = start_pos + self.length
+            result.extend(self.right.collect_sequence_structure(right_pos))
+        
+        return result
+    
+    def create_sequence_visualization(self, output_file, max_width=80, seq_id=None):
+        """
+        创建整个序列的可视化展示
+        
+        Args:
+            output_file: 输出文件对象
+            max_width (int): 输出的最大宽度
+            seq_id (str): 序列ID
+        """
+        # 收集序列结构信息
+        structure = self.collect_sequence_structure()
+        
+        # 按照位置排序
+        structure.sort(key=lambda x: (x[1], -x[2]))
+        
+        # 计算嵌套深度
+        node_depths = {}
+        for i, (node, start, end, _) in enumerate(structure):
+            # 查找该节点的所有父节点
+            depth = 0
+            for parent_node, parent_start, parent_end, _ in structure:
+                if parent_node != node and parent_start <= start and parent_end >= end:
+                    depth += 1
+            # 更新节点深度
+            structure[i] = (node, start, end, depth)
+        
+        # 如果提供了序列ID，显示标题
+        if seq_id:
+            print(f"输入序列 {seq_id} 结构可视化:", file=output_file)
+            print("=" * max_width, file=output_file)
+            print("", file=output_file)
+        
+        # 输出可视化
+        total_length = structure[-1][2] + 1  # 最后一个节点的结束位置 + 1
+        
+        # 确定每页的长度范围
+        page_size = 2000  # 每页显示的序列长度
+        page_count = (total_length + page_size - 1) // page_size
+        
+        for page in range(page_count):
+            page_start = page * page_size
+            page_end = min((page + 1) * page_size - 1, total_length - 1)
+            
+            # 打印页标题
+            if page_count > 1:
+                print(f"序列部分 {page+1}/{page_count}: 位置 {page_start}-{page_end}", file=output_file)
+                print("-" * max_width, file=output_file)
+            
+            # 筛选当前页范围内的节点
+            page_nodes = [(node, start, end, depth) for node, start, end, depth in structure 
+                         if not (end < page_start or start > page_end)]
+            
+            # 对于每个节点，生成其可视化行
+            for node, start, end, depth in page_nodes:
+                # 计算在页面中的起始和结束位置
+                vis_start = max(start, page_start)
+                vis_end = min(end, page_end)
+                
+                # 缩进显示嵌套关系
+                indent = "  " * depth
+                
+                # 确定节点类型
+                node_type = "REF" if node.is_reference else "SEQ"
+                
+                # 获取序列预览
+                start_preview = node.content[:VIZ_SEQ_PREVIEW_LENGTH]
+                end_preview = node.content[-VIZ_SEQ_PREVIEW_LENGTH:] if len(node.content) >= VIZ_SEQ_PREVIEW_LENGTH else node.content
+                
+                # 计算表示序列的符号数量
+                available_width = max_width - len(indent) - len(str(start)) - len(str(end)) - \
+                                 len(start_preview) - len(end_preview) - len(node_type) - len(str(node.length)) - 20
+                
+                symbols_count = max(1, min(available_width, int(node.length / 10)))
+                symbols = "=" * symbols_count if node_type == "SEQ" else "-" * symbols_count
+                
+                # 生成节点可视化行
+                line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
+                print(line, file=output_file)
+            
+            print("", file=output_file)
+            if page < page_count - 1:
+                print("=" * max_width, file=output_file)
+                print("", file=output_file)
 
 
 class SeqGenerator:
@@ -1133,9 +1211,8 @@ class SeqGenerator:
             f.write("- 缩进表示嵌套层级\n\n")
             f.write("="*80 + "\n\n")
             
-            # 调用根节点的可视化方法
-            f.write(f"输入序列 {seq_id} 完整结构:\n")
-            root_node.visualize(0, "", f)
+            # 使用新的可视化方法
+            root_node.create_sequence_visualization(f, max_width=VIZ_MAX_WIDTH, seq_id=seq_id)
 
 
 def main():
