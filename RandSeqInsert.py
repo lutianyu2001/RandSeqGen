@@ -823,7 +823,7 @@ class SequenceNode:
                 symbols_count = max(1, min(available_width, int(length_percentage * max_symbols)))
                 
                 # 使用不同的符号表示不同类型的节点
-                symbols = "=" * symbols_count if node_type == "SEQ" else "-" * symbols_count
+                symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
                 
                 # 生成节点可视化行
                 line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
