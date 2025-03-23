@@ -526,7 +526,7 @@ class SequenceNode:
             
             # Add spaces until left connection position
             if left_conn_pos > 0:
-                fork_line += " " * left_conn_pos
+                fork_line += " " * (left_conn_pos - 1)
                 
             # Add left part of fork
             fork_line += "┌"
@@ -552,7 +552,7 @@ class SequenceNode:
             result.append(fork_line)
             
             # Add vertical connectors to children
-            vert_line = " " * left_conn_pos + "│" + " " * (right_conn_pos - left_conn_pos - 1) + "│"
+            vert_line = " " * left_conn_pos + "│" + " " * (right_conn_pos - left_conn_pos) + "│"
             if len(vert_line) < total_width:
                 vert_line += " " * (total_width - len(vert_line))
             result.append(vert_line)
@@ -600,7 +600,7 @@ class SequenceNode:
                 # Left side connection
                 if parent_center > left_child_center:
                     # Parent is to the right of child
-                    connector_line += " " * left_child_center + "┌" + "─" * (parent_center - left_child_center - 1) + "┴"
+                    connector_line += " " * (left_child_center - 1) + "┌" + "─" * (parent_center - left_child_center - 1) + "┴"
                 else:
                     # Parent is to the left of child
                     connector_line += " " * parent_center + "┴" + "─" * (left_child_center - parent_center - 1) + "┐"
@@ -641,7 +641,7 @@ class SequenceNode:
                 left_pos = min(parent_center, right_pos + right_child_center)
                 right_pos = max(parent_center, right_pos + right_child_center)
                 
-                connector_line += " " * left_pos + "┌" + "─" * (right_pos - left_pos - 1) + "┐"
+                connector_line += " " * (left_pos - 1) + "┌" + "─" * (right_pos - left_pos - 1) + "┐"
             else:
                 # Centers align
                 connector_line += " " * parent_center + "│"
