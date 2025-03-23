@@ -390,33 +390,97 @@ class SequenceNode:
             abs_position (int): Current absolute position in the concatenated sequence
         
         Returns:
-            Tuple[List[SeqRecord], int]: A tuple containing:
+            Tuple[List[SeqRecord], Dict[int, SequenceNode], int]: A tuple containing:
                 - List of reference records
+                - Dictionary mapping positions to nodes (for nested structure tracking)
                 - The total length of this subtree
         """
         ref_records = []
+        position_node_map = {}  # 映射位置到节点
         
         left_length = 0
+        left_node_map = {}
         if self.left:
-            left_refs, left_length = self.left.collect_refs(seq_id, abs_position)
+            left_refs, left_node_map, left_length = self.left.collect_refs(seq_id, abs_position)
             ref_records.extend(left_refs)
+            position_node_map.update(left_node_map)
         
         current_position = abs_position + left_length
         
         if self.is_reference:
-            # Create a reference record with absolute position
+            # 记录当前节点位置
             start_index = current_position
             end_index = start_index + self.length
-            ref_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
-            ref_record = create_sequence_record(self.content, ref_id)
-            ref_records.append(ref_record)
+            position_node_map[start_index] = self
         
         right_length = 0
+        right_node_map = {}
         if self.right:
-            right_refs, right_length = self.right.collect_refs(seq_id, current_position + self.length)
+            right_refs, right_node_map, right_length = self.right.collect_refs(seq_id, current_position + self.length)
             ref_records.extend(right_refs)
+            position_node_map.update(right_node_map)
         
-        return ref_records, left_length + self.length + right_length
+        # 第一次遍历完节点树后, 返回引用记录列表、位置节点映射和总长度
+        return ref_records, position_node_map, left_length + self.length + right_length
+    
+    def construct_nested_refs(self, seq_id: str, abs_position: int = 0):
+        """
+        构建包含嵌套关系的引用序列记录。
+        
+        Args:
+            seq_id (str): 原始序列ID
+            abs_position (int): 当前节点在串联序列中的绝对位置
+        
+        Returns:
+            Tuple[List[SeqRecord], int]: 包含:
+                - 引用记录列表
+                - 子树总长度
+        """
+        # 第一步：收集所有引用节点并映射到其位置
+        _, position_node_map, total_length = self.collect_refs(seq_id, abs_position)
+        
+        # 第二步：对映射排序，生成包含嵌套的引用序列
+        nested_records = []
+        
+        # 按位置排序节点（从后向前）
+        sorted_positions = sorted(position_node_map.keys(), reverse=True)
+        
+        for pos in sorted_positions:
+            node = position_node_map[pos]
+            start_index = pos
+            end_index = start_index + node.length
+            
+            # 从节点获取完整内容（包含嵌套序列）
+            content = str(node)
+            
+            # 构建新的ID，包含IS标识
+            ref_id = f"{seq_id}_{start_index}_{end_index}-+-{node.length}-+-IS"
+            
+            # 检查该节点是否也是TS（被其他序列插入）
+            is_ts = False
+            for other_pos in sorted_positions:
+                if other_pos != pos:  # 不是自己
+                    other_node = position_node_map[other_pos]
+                    # 如果当前节点位置在其他节点的范围内
+                    if other_pos < start_index < other_pos + other_node.length:
+                        is_ts = True
+                        break
+            
+            # 如果是TS，添加TS标识
+            if is_ts:
+                ref_id = f"{seq_id}_{start_index}_{end_index}-+-{node.length}-+-IS-+-TS"
+            
+            # 创建记录
+            ref_record = create_sequence_record(content, ref_id)
+            nested_records.append(ref_record)
+        
+        # 最后添加整个序列作为TS
+        full_seq = str(self)
+        full_id = f"{seq_id}_0_{len(full_seq)}-+-{len(full_seq)}-+-TS"
+        full_record = create_sequence_record(full_seq, full_id)
+        nested_records.append(full_record)
+        
+        return nested_records, total_length
     
     def _create_node_info(self, current_position: int) -> tuple:
         """
@@ -912,8 +976,8 @@ class SeqGenerator:
             os.makedirs(self.output_dir)
 
     def __process_single_sequence(self, seq_record: SeqRecord, seq_num: int) -> Tuple[SeqRecord, 
-                                                                                      Optional[List[SeqRecord]],
-                                                                                      Optional[SequenceNode]]:
+                                                                                  Optional[List[SeqRecord]],
+                                                                                  Optional[SequenceNode]]:
         """
         Process a single sequence through all iterations using a tree-based algorithm.
         Directly navigates the tree for insertions without rebuilding it.
@@ -962,14 +1026,18 @@ class SeqGenerator:
         # Only collect reference sequences if tracking is enabled
         used_refs = None
         if self.flag_track:
-            used_refs, _ = root.collect_refs(seq_record.id)
+            used_refs, _ = root.construct_nested_refs(seq_record.id)
+            return new_seq_record, used_refs, root
+        
+        # 如果启用可视化，返回根节点
+        if self.flag_visualize:
             return new_seq_record, used_refs, root
         
         return new_seq_record, used_refs, None
 
     def _process_chunk(self, chunk_idx: int, chunk_size: int, total_sequences: int) -> Tuple[List[SeqRecord], 
-                                                                                             Optional[List[SeqRecord]],
-                                                                                             Optional[Dict[str, List[str]]]]:
+                                                                                         Optional[List[SeqRecord]],
+                                                                                         Optional[Dict[str, List[str]]]]:
         """
         Process a chunk of sequences.
         
@@ -987,19 +1055,19 @@ class SeqGenerator:
         
         processed_seqs = []
         used_refs = [] if self.flag_track else None
-        tree_visuals = {} if self.flag_track else None
+        tree_visuals = {} if self.flag_visualize else None
         
         for i in range(start_idx, end_idx):
             seq_record = self.input[i]
             processed_seq, refs, root_node = self.__process_single_sequence(seq_record, i + 1)
             processed_seqs.append(processed_seq)
             
-            if self.flag_track:
-                if refs:
-                    used_refs.extend(refs)
-                if root_node:
-                    tree_lines, _, _ = root_node.generate_tree_visual()
-                    tree_visuals[seq_record.id] = tree_lines
+            if self.flag_track and refs:
+                used_refs.extend(refs)
+            
+            if self.flag_visualize and root_node:
+                tree_lines, _, _ = root_node.generate_tree_visual()
+                tree_visuals[seq_record.id] = tree_lines
         
         return processed_seqs, used_refs, tree_visuals
 
@@ -1029,18 +1097,17 @@ class SeqGenerator:
         # Process chunks in parallel
         all_sequences = []
         all_refs = [] if self.flag_track else None
-        all_tree_visuals = {} if self.flag_track else None
+        all_tree_visuals = {} if self.flag_visualize else None
         
         with mp.Pool(self.processors) as pool:
             results_iter = pool.starmap(self._process_chunk, chunk_args)
             
             for i, (seqs, refs, tree_visuals) in enumerate(results_iter, 1):
                 all_sequences.extend(seqs)
-                if self.flag_track:
-                    if refs:
-                        all_refs.extend(refs)
-                    if tree_visuals:
-                        all_tree_visuals.update(tree_visuals)
+                if self.flag_track and refs:
+                    all_refs.extend(refs)
+                if self.flag_visualize and tree_visuals:
+                    all_tree_visuals.update(tree_visuals)
                 print(f"Completed chunk {i}/{num_chunks}")
         
         return all_sequences, all_refs, all_tree_visuals
@@ -1060,18 +1127,17 @@ class SeqGenerator:
         """
         all_sequences = []
         all_refs = [] if self.flag_track else None
-        all_tree_visuals = {} if self.flag_track else None
+        all_tree_visuals = {} if self.flag_visualize else None
         
         for i, seq_record in enumerate(self.input):
             processed_seq, refs, root_node = self.__process_single_sequence(seq_record, i + 1)
             all_sequences.append(processed_seq)
             
-            if self.flag_track:
-                if refs:
-                    all_refs.extend(refs)
-                if root_node:
-                    tree_lines, _, _ = root_node.generate_tree_visual()
-                    all_tree_visuals[seq_record.id] = tree_lines
+            if self.flag_track and refs:
+                all_refs.extend(refs)
+            if self.flag_visualize and root_node:
+                tree_lines, _, _ = root_node.generate_tree_visual()
+                all_tree_visuals[seq_record.id] = tree_lines
             
             if (i + 1) % 10 == 0 or i + 1 == total_sequences:
                 print(f"Processed {i+1}/{total_sequences} sequences")
@@ -1134,21 +1200,21 @@ class SeqGenerator:
         print(f"Saving {len(sequences)} processed sequences")
         output_dict = {f"sequences{suffix}.fasta": sequences}
         
-        if self.flag_track:
-            if references:
-                print(f"Saving {len(references)} reference sequence records")
-                output_dict[f"used_refs{suffix}.fasta"] = references
-            
-            if tree_visuals:
-                print(f"Saving tree structure visualizations")
-                tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
-                with open(tree_file_path, 'w', encoding='utf-8') as tree_file:
-                    for seq_id, lines in tree_visuals.items():
-                        tree_file.write(f"=== Tree Structure Visualization: {seq_id} ===\n")
-                        tree_file.write("Node Format: Type|Start-End|Length[Metadata]\n")
-                        tree_file.write("SEQ: Original sequence node, REF: Inserted reference sequence node\n\n")
-                        tree_file.write("\n".join(lines))
-                        tree_file.write("\n\n" + "="*80 + "\n\n")
+        if self.flag_track and references:
+            print(f"Saving {len(references)} reference sequence records")
+            output_dict[f"used_refs{suffix}.fasta"] = references
+        
+        # 将树结构可视化保存移到flag_visualize条件下
+        if self.flag_visualize and tree_visuals:
+            print(f"Saving tree structure visualizations")
+            tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
+            with open(tree_file_path, 'w', encoding='utf-8') as tree_file:
+                for seq_id, lines in tree_visuals.items():
+                    tree_file.write(f"=== Tree Structure Visualization: {seq_id} ===\n")
+                    tree_file.write("Node Format: Type|Start-End|Length[Metadata]\n")
+                    tree_file.write("SEQ: Original sequence node, REF: Inserted reference sequence node\n\n")
+                    tree_file.write("\n".join(lines))
+                    tree_file.write("\n\n" + "="*80 + "\n\n")
         
         save_multi_fasta_from_dict(output_dict, output_dir)
 
@@ -1281,7 +1347,7 @@ def main():
     flag_group.add_argument("--track", action="store_true",
                        help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
     flag_group.add_argument("--visual", action="store_true",
-                       help="生成序列插入可视化文件，以文本形式展示原始序列和参考序列的嵌套关系")
+                       help="Generate sequence insertion visualization files (both tree and sequence visualizations), displaying the nested relationship between original sequences and reference sequences in text format.")
 
     parsed_args = parser.parse_args()
 
