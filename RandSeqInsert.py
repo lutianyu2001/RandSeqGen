@@ -482,101 +482,126 @@ class SequenceNode:
         # Add connecting lines to children
         if self.left and self.right:
             # Both children exist
-            # Center position for vertical connector
-            center_pos = node_width // 2
+            # Get size of boxes for positioning
+            left_box_width = len(left_lines[0]) if left_lines else 0
+            right_box_width = len(right_lines[0]) if right_lines else 0
             
-            # Add vertical connector from node to branch point
-            result.append(" " * center_pos + "│" + " " * (node_width - center_pos - 1))
+            # Calculate positions for better alignment
+            parent_center = node_width // 2
             
-            # Create a branching line
-            result.append(" " * (center_pos - 1) + "┌" + "┴" + "┐" + " " * (node_width - center_pos - 2))
+            # Calculate left and right child centers based on their box widths
+            left_child_center = left_box_width // 2
+            right_child_center = right_box_width // 2
             
-            # Calculate positions for left and right branches
-            left_branch_pos = center_pos - 1
-            right_branch_pos = center_pos + 1
+            # Calculate total width needed (with spacing)
+            total_width = left_box_width + right_box_width + 10  # Add extra space between trees
             
-            # Create connectors to children based on their width
-            left_child_center = left_width // 2
-            right_child_center = right_width // 2
+            # Position the left and right children with space between them
+            left_box_pos = 0
+            right_box_pos = left_box_width + 10  # Position right box after left box with spacing
             
-            # Calculate the total width needed for both children
-            total_width = max(left_branch_pos + 1 + right_width, right_branch_pos + right_width)
+            # Calculate positions for fork line to connect to children
+            left_conn_pos = left_box_pos + left_child_center
+            right_conn_pos = right_box_pos + right_child_center
             
-            # Create extended horizontal lines if needed
-            if left_child_center < left_branch_pos:
-                # Left child is narrower than the connection point
-                horizontal_left = " " * (left_branch_pos - left_child_center) + "─" * left_child_center
-                result.append(" " * (left_branch_pos - len(horizontal_left)) + horizontal_left + "│" + 
-                             " " * (right_branch_pos - left_branch_pos - 1) + "│" + " " * (total_width - right_branch_pos - 1))
+            # Add vertical connector from node
+            result.append(" " * parent_center + "│" + " " * (total_width - parent_center - 1))
+            
+            # Create the branching line that's wide enough to connect both children
+            fork_line = " " * min(parent_center, left_conn_pos)
+            
+            # Start of fork from center moving left
+            if parent_center > left_conn_pos:
+                fork_line += "└" + "─" * (parent_center - left_conn_pos - 1) + "┴"
             else:
-                # Left child is wider or same width as connection point
-                result.append(" " * left_branch_pos + "│" + " " * (right_branch_pos - left_branch_pos - 1) + 
-                             "│" + " " * (total_width - right_branch_pos - 1))
+                fork_line += "┌" + "─" * (left_conn_pos - parent_center - 1) + "┴"
+                
+            # Continuation of fork to right child
+            fork_line += "─" * (right_conn_pos - left_conn_pos - 1) + "┐"
             
-            # Append the left and right subtrees side by side
+            # Add any padding needed to match total width
+            fork_line += " " * (total_width - len(fork_line))
+            
+            result.append(fork_line)
+            
+            # Add vertical connectors to each child
+            vert_line = " " * left_conn_pos + "│" + " " * (right_conn_pos - left_conn_pos - 1) + "│" + " " * (total_width - right_conn_pos - 1)
+            result.append(vert_line)
+            
+            # Now append the children trees side by side with proper positioning
             for i in range(max(len(left_lines), len(right_lines))):
-                left_part = left_lines[i] if i < len(left_lines) else " " * left_width
-                right_part = right_lines[i] if i < len(right_lines) else " " * right_width
+                line = ""
                 
-                # Padding between subtrees to align with the connection points
-                padding = (right_branch_pos - left_branch_pos - 1) - (len(left_part) - left_child_center)
-                padding = max(0, padding)
+                # Add left tree line if exists
+                if i < len(left_lines):
+                    line += left_lines[i]
+                else:
+                    line += " " * left_box_width
                 
-                result.append(left_part + " " * padding + right_part)
+                # Add spacing
+                line += " " * (right_box_pos - left_box_width)
+                
+                # Add right tree line if exists
+                if i < len(right_lines):
+                    line += right_lines[i]
+                else:
+                    line += " " * right_box_width
+                
+                # Ensure line is proper width
+                line += " " * (total_width - len(line))
+                
+                result.append(line)
                 
         elif self.left:
             # Only left child exists
-            center_pos = node_width // 2
-            
-            # Add vertical connector
-            result.append(" " * center_pos + "│" + " " * (node_width - center_pos - 1))
-            
-            # Calculate left child center
+            parent_center = node_width // 2
             left_child_center = left_width // 2
             
-            # If left child center doesn't align with our connector
-            if left_child_center != center_pos:
-                horizontal_line = "─" * abs(left_child_center - center_pos)
-                if left_child_center < center_pos:
-                    result.append(" " * left_child_center + horizontal_line + "│" + " " * (node_width - center_pos - 1))
-                else:
-                    result.append(" " * center_pos + "│" + horizontal_line + " " * (node_width - center_pos - 1 - len(horizontal_line)))
-            else:
-                result.append(" " * center_pos + "│" + " " * (node_width - center_pos - 1))
+            # Determine how to connect the parent to child
+            # Add vertical connector
+            result.append(" " * parent_center + "│" + " " * (left_width - parent_center))
             
-            # Add the left subtree aligned with the connection
+            # Create horizontal connector if centers don't align
+            if parent_center != left_child_center:
+                if parent_center > left_child_center:
+                    # Parent is to the right of child
+                    connector = " " * left_child_center + "┌" + "─" * (parent_center - left_child_center - 1) + "┘" + " " * (left_width - parent_center)
+                else:
+                    # Parent is to the left of child
+                    connector = " " * parent_center + "└" + "─" * (left_child_center - parent_center - 1) + "┐" + " " * (left_width - left_child_center - 1)
+                result.append(connector)
+            else:
+                # Centers align, just add a vertical line
+                result.append(" " * parent_center + "│" + " " * (left_width - parent_center))
+            
+            # Add the left subtree
             for line in left_lines:
                 result.append(line + " " * (node_width - len(line)))
                 
         elif self.right:
             # Only right child exists
-            center_pos = node_width // 2
+            parent_center = node_width // 2
+            
+            # Calculate right child center and total width needed
+            right_child_center = right_width // 2
+            total_width = max(node_width, right_width + parent_center)
             
             # Add vertical connector
-            result.append(" " * center_pos + "│" + " " * (node_width - center_pos - 1))
+            result.append(" " * parent_center + "│" + " " * (total_width - parent_center - 1))
             
-            # Calculate right child center and total width
-            right_child_center = right_width // 2
-            total_width = max(node_width, right_width)
+            # Position right child with enough space
+            right_child_pos = parent_center
             
-            # If right child center doesn't align with our connector
-            if center_pos != right_child_center:
-                horizontal_line = "─" * abs(right_child_center - center_pos)
-                if right_child_center > center_pos:
-                    result.append(" " * center_pos + "│" + horizontal_line + " " * (total_width - center_pos - 1 - len(horizontal_line)))
-                else:
-                    pad_left = center_pos - (right_child_center + len(horizontal_line))
-                    result.append(" " * pad_left + horizontal_line + "│" + " " * (total_width - pad_left - len(horizontal_line) - 1))
+            # Create horizontal connection if needed
+            if right_child_center != 0:  # If right child center is not at left edge
+                connector = " " * parent_center + "└" + "─" * (right_child_center) + "┐" + " " * (total_width - parent_center - right_child_center - 2)
+                result.append(connector)
             else:
-                result.append(" " * center_pos + "│" + " " * (total_width - center_pos - 1))
+                result.append(" " * parent_center + "└─┐" + " " * (total_width - parent_center - 3))
             
-            # Add the right subtree aligned with the connection
+            # Add the right subtree aligned after the connection
             for line in right_lines:
-                padding = center_pos - right_child_center
-                if padding > 0:
-                    result.append(" " * padding + line + " " * (total_width - padding - len(line)))
-                else:
-                    result.append(line + " " * (total_width - len(line)))
+                result.append(" " * right_child_pos + line + " " * (total_width - right_child_pos - len(line)))
         
         return result, left_length + self.length + right_length, height
 
