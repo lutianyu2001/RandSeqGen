@@ -422,8 +422,8 @@ class SequenceNode:
         Returns:
             Tuple[List[str], int, int]: A tuple containing:
                 - List of strings representing the tree structure
-                - The total length of this subtree
-                - The height of this subtree
+                - Total length of this subtree
+                - Height of this subtree
         """
         # First collect node information and positions
         left_lines, left_length, left_height = [], 0, 0
@@ -450,13 +450,13 @@ class SequenceNode:
         # Format node label
         node_label = f"{node_type}|{current_position}-{end_position}|{self.length}{metadata_str}"
         
-        # Calculate width needed for this node
-        node_width = max(len(node_label), 10)  # Minimum width to avoid too narrow nodes
+        # Calculate node width - ensure frame can accommodate text
+        node_width = len(node_label) + 4  # Add frame and some padding
         
         # Center the node label
-        node_line = node_label.center(node_width, ' ')
+        node_line = node_label.center(node_width - 2, ' ')  # -2 for frame characters
         
-        # Prepare the result lines for this node and its subtrees
+        # Prepare result lines for this node and its subtrees
         result = []
         
         # Calculate height of this subtree
@@ -470,43 +470,67 @@ class SequenceNode:
             return result, self.length, 1
         
         # Handle nodes with children
-        # Calculate spaces needed for aligning children
+        # Calculate space needed for aligning children
         left_width = len(left_lines[0]) if left_lines else 0
         right_width = len(right_lines[0]) if right_lines else 0
         
-        # Top of node box
+        # Add more space to distinguish left and right subtrees
+        spacing = 6  # Extra spacing between left and right subtrees
+        
+        # Node box top
         result.append("┌" + "─" * (node_width - 2) + "┐")
         result.append("│" + node_line + "│")
         result.append("└" + "─" * (node_width - 2) + "┘")
         
         # Add connecting lines to children
         if self.left and self.right:
-            # Both children present
+            # Both children exist
             # Connector line from this node to left and right children
-            left_branch = "┌" + "─" * (left_width // 2)
-            right_branch = "─" * (right_width // 2) + "┐"
-            connector = left_branch + "┴" + right_branch
-            result.append(connector.center(max(node_width, left_width + right_width), ' '))
+            connector_line = " " * ((node_width - 1) // 2) + "│" + " " * ((node_width - 1) // 2)
+            result.append(connector_line)
             
-            # Merge left and right subtrees side by side
+            left_side = (node_width - 1) // 2
+            right_side = node_width - left_side - 1
+            
+            # Build fork for left and right branches
+            fork_line = " " * (left_side - 1) + "┌" + "┴" + "┐" + " " * (right_side - 1)
+            result.append(fork_line)
+            
+            # Add vertical connection extensions
+            left_conn = " " * (left_side - 1) + "│" + " " * (node_width - left_side)
+            right_conn = " " * (node_width - right_side) + "│" + " " * (right_side - 1)
+            result.append(left_conn)
+            result.append(right_conn)
+            
+            # Merge left and right subtrees
             for i in range(max(len(left_lines), len(right_lines))):
-                left_part = left_lines[i] if i < len(left_lines) else " " * left_width
-                right_part = right_lines[i] if i < len(right_lines) else " " * right_width
-                result.append(left_part + " " + right_part)
+                if i < len(left_lines):
+                    left_part = left_lines[i]
+                else:
+                    left_part = " " * left_width
+                    
+                if i < len(right_lines):
+                    right_part = right_lines[i]
+                else:
+                    right_part = " " * right_width
+                    
+                result.append(left_part + " " * spacing + right_part)
                 
         elif self.left:
             # Only left child
-            connector = "│".center(node_width)
+            connector = " " * ((node_width - 1) // 2) + "│" + " " * ((node_width - 1) // 2)
             result.append(connector)
+            result.append(connector)  # Add extra connector line
             for line in left_lines:
-                result.append(line)
+                result.append(" " * ((node_width - len(line)) // 2) + line)
                 
         elif self.right:
             # Only right child
-            connector = "│".center(node_width)
+            connector = " " * ((node_width - 1) // 2) + "│" + " " * ((node_width - 1) // 2)
             result.append(connector)
+            result.append(connector)  # Add extra connector line
             for line in right_lines:
-                result.append(line)
+                result.append(" " * ((node_width - len(line)) // 2) + line)
         
         return result, left_length + self.length + right_length, height
 
@@ -796,9 +820,9 @@ class SeqGenerator:
                 tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
                 with open(tree_file_path, 'w', encoding='utf-8') as tree_file:
                     for seq_id, lines in tree_visuals.items():
-                        tree_file.write(f"=== 树结构可视化: {seq_id} ===\n")
-                        tree_file.write("节点格式: 类型|开始-结束|长度[元数据]\n")
-                        tree_file.write("SEQ: 原始序列节点, REF: 插入的参考序列节点\n\n")
+                        tree_file.write(f"=== Tree Structure Visualization: {seq_id} ===\n")
+                        tree_file.write("Node Format: Type|Start-End|Length[Metadata]\n")
+                        tree_file.write("SEQ: Original sequence node, REF: Inserted reference sequence node\n\n")
                         tree_file.write("\n".join(lines))
                         tree_file.write("\n\n" + "="*80 + "\n\n")
         
