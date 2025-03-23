@@ -30,7 +30,9 @@ DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqInsert-Result"
 
 # 可视化参数
 VIZ_MAX_WIDTH = 80  # 可视化输出的最大宽度（字符数）
-VIZ_SEQ_PREVIEW_LENGTH = 5  # 在可视化中显示序列内容的前后碱基数量
+VIZ_SEQ_PREVIEW_LENGTH = 4  # 在可视化中显示序列内容的前后碱基数量
+VIZ_PAGE_SIZE_FACTOR = 25  # 每页显示的序列长度 = VIZ_MAX_WIDTH * VIZ_PAGE_SIZE_FACTOR
+VIZ_MAX_SYMBOLS = 40  # 序列可视化符号的最大数量
 
 PROGRAM_ROOT_DIR_ABS_PATH = os.path.dirname(__file__)
 DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_PATH)
@@ -772,8 +774,8 @@ class SequenceNode:
         # 输出可视化
         total_length = structure[-1][2] + 1  # 最后一个节点的结束位置 + 1
         
-        # 确定每页的长度范围
-        page_size = 2000  # 每页显示的序列长度
+        # 确定每页的长度范围 - 使用全局常量来动态计算
+        page_size = max_width * VIZ_PAGE_SIZE_FACTOR  # 动态计算每页显示的序列长度
         page_count = (total_length + page_size - 1) // page_size
         
         for page in range(page_count):
@@ -810,23 +812,44 @@ class SequenceNode:
                 # 确定节点类型
                 node_type = "REF" if node.is_reference else "SEQ"
                 
-                # 获取序列预览
-                start_preview = node.content[:VIZ_SEQ_PREVIEW_LENGTH]
-                end_preview = node.content[-VIZ_SEQ_PREVIEW_LENGTH:] if len(node.content) >= VIZ_SEQ_PREVIEW_LENGTH else node.content
+                # 获取序列预览 - 修复短序列问题
+                if len(node.content) <= VIZ_SEQ_PREVIEW_LENGTH * 2:
+                    # 如果序列很短，仅显示一半内容在开始和结束
+                    preview_length = len(node.content) // 2
+                    if preview_length == 0:  # 处理极短序列
+                        preview_length = 1 if len(node.content) > 0 else 0
+                    start_preview = node.content[:preview_length]
+                    end_preview = node.content[-preview_length:] if preview_length > 0 else ""
+                else:
+                    # 正常情况
+                    start_preview = node.content[:VIZ_SEQ_PREVIEW_LENGTH]
+                    end_preview = node.content[-VIZ_SEQ_PREVIEW_LENGTH:]
                 
-                # 计算表示序列的符号数量 - 修改为基于当前页中的比例
+                # 计算可用宽度，确保不超出最大宽度
                 available_width = max_width - len(indent) - len(str(start)) - len(str(end)) - \
                                  len(start_preview) - len(end_preview) - len(node_type) - len(str(node.length)) - 20
                 
-                # 基于百分比和可用宽度计算符号数量
-                max_symbols = 50  # 最大符号数量
-                symbols_count = max(1, min(available_width, int(length_percentage * max_symbols)))
+                # 确保available_width不为负数
+                available_width = max(1, available_width)
+                
+                # 基于百分比和可用宽度计算符号数量，使用全局常量限制
+                symbols_count = max(1, min(available_width, int(length_percentage * VIZ_MAX_SYMBOLS)))
                 
                 # 使用不同的符号表示不同类型的节点
                 symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
                 
-                # 生成节点可视化行
+                # 生成节点可视化行，确保其不超过最大宽度
                 line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
+                
+                # 如果行太长，截断符号
+                if len(line) > max_width:
+                    excess = len(line) - max_width + 3  # +3 为了添加"..."
+                    symbols_new_length = max(1, symbols_count - excess // 2)
+                    symbols = "=" * symbols_new_length if node_type == "SEQ" else "-" * symbols_new_length
+                    line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
+                    if len(line) > max_width:
+                        line = line[:max_width-3] + "..."
+                
                 print(line, file=output_file)
             
             print("", file=output_file)
@@ -1202,14 +1225,14 @@ class SeqGenerator:
         with open(viz_path, 'w') as f:
             # 添加标题
             f.write(f"序列可视化: {seq_id}\n")
-            f.write("="*80 + "\n\n")
+            f.write("="*VIZ_MAX_WIDTH + "\n\n")
             f.write("说明:\n")
             f.write("- SEQ: 原始序列节点\n")
             f.write("- REF: 插入的参考序列节点\n")
             f.write("- 数字表示序列在完整序列中的位置\n")
-            f.write("- 左右两侧显示序列的实际内容（前后各5个碱基）\n")
+            f.write(f"- 左右两侧显示序列的实际内容（前后各{VIZ_SEQ_PREVIEW_LENGTH}个碱基）\n")
             f.write("- 缩进表示嵌套层级\n\n")
-            f.write("="*80 + "\n\n")
+            f.write("="*VIZ_MAX_WIDTH + "\n\n")
             
             # 使用新的可视化方法
             root_node.create_sequence_visualization(f, max_width=VIZ_MAX_WIDTH, seq_id=seq_id)
