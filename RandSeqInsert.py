@@ -412,20 +412,212 @@ class SequenceNode:
         
         return ref_records, left_length + self.length + right_length
     
+    def _create_node_info(self, current_position: int) -> tuple:
+        """
+        Create node information.
+        
+        Args:
+            current_position (int): The absolute position of the current node in the sequence
+            
+        Returns:
+            tuple: Contains node label, node width, and centered node line
+        """
+        # Node type and position information
+        node_type = "REF" if self.is_reference else "SEQ"
+        end_position = current_position + self.length - 1  # -1 for 0-based index
+        
+        # Metadata information
+        metadata_str = ""
+        if self.metadata and self.is_reference:
+            metadata_str = f" [iter:{self.metadata.get('iteration', '?')},pos:{self.metadata.get('rel_pos', '?')}]"
+        
+        # Format node label
+        node_label = f"{node_type}|{current_position}-{end_position}|{self.length}{metadata_str}"
+        
+        # Calculate node width and ensure frame can accommodate text
+        node_width = len(node_label) + 4  # Add frame and some padding
+        
+        # Center node label
+        node_line = node_label.center(node_width - 2, ' ')  # -2 for frame characters
+        
+        return node_label, node_width, node_line
+    
+    def _create_node_box(self, node_line: str, node_width: int) -> list:
+        """
+        Create a node box.
+        
+        Args:
+            node_line (str): Node content line
+            node_width (int): Node width
+            
+        Returns:
+            list: List of strings containing the node box
+        """
+        return [
+            "┌" + "─" * (node_width - 2) + "┐",
+            "│" + node_line + "│",
+            "└" + "─" * (node_width - 2) + "┘"
+        ]
+    
+    def _create_leaf_visual(self, node_width: int, node_line: str) -> tuple:
+        """
+        Create visual representation for a leaf node.
+        
+        Args:
+            node_width (int): Node width
+            node_line (str): Node content line
+            
+        Returns:
+            tuple: Contains list of strings representing the visual, node length, and height
+        """
+        result = self._create_node_box(node_line, node_width)
+        return result, self.length, 1
+    
+    def _create_fork_line(self, parent_center: int, left_conn_pos: int, right_conn_pos: int, total_width: int) -> str:
+        """
+        Create a fork line connecting two child nodes.
+        
+        Args:
+            parent_center (int): Center position of the parent node
+            left_conn_pos (int): Connection position for the left child
+            right_conn_pos (int): Connection position for the right child
+            total_width (int): Total width
+            
+        Returns:
+            str: Fork line string
+        """
+        # Determine fork center position
+        if left_conn_pos <= parent_center <= right_conn_pos:
+            # Parent between children - ideal case
+            fork_center = parent_center
+        elif parent_center < left_conn_pos:
+            # Parent to the left of both children
+            fork_center = left_conn_pos
+        else:
+            # Parent to the right of both children
+            fork_center = right_conn_pos
+        
+        # Build fork line
+        parts = []
+        
+        # Add left padding
+        if left_conn_pos > 0:
+            parts.append(" " * (left_conn_pos - 1))
+            
+        # Add left fork
+        parts.append("┌")
+        
+        # Add horizontal line to fork center
+        if fork_center > left_conn_pos + 1:
+            parts.append("─" * (fork_center - left_conn_pos - 1))
+            
+        # Add fork connection point
+        parts.append("┴")
+        
+        # Add horizontal line to right connection
+        if right_conn_pos > fork_center + 1:
+            parts.append("─" * (right_conn_pos - fork_center - 1))
+            
+        # Add right fork
+        parts.append("┐")
+        
+        fork_line = "".join(parts)
+        
+        # Add padding to match total width
+        return fork_line.ljust(total_width)
+    
+    def _align_child_trees(self, left_lines: list, right_lines: list, left_box_width: int, right_box_width: int, 
+                          right_box_pos: int, total_width: int) -> list:
+        """
+        Align and merge left and right subtree visualizations.
+        
+        Args:
+            left_lines (list): List of lines for left subtree
+            right_lines (list): List of lines for right subtree
+            left_box_width (int): Width of left subtree box
+            right_box_width (int): Width of right subtree box
+            right_box_pos (int): Position of right subtree box
+            total_width (int): Total width
+            
+        Returns:
+            list: Merged subtree lines
+        """
+        result = []
+        max_lines = max(len(left_lines), len(right_lines))
+        
+        for i in range(max_lines):
+            # Add left subtree line
+            if i < len(left_lines):
+                line = left_lines[i]
+            else:
+                line = " " * left_box_width
+                
+            # Add spacing
+            line = line.ljust(right_box_pos)
+            
+            # Add right subtree line
+            if i < len(right_lines):
+                line += right_lines[i]
+            else:
+                line += " " * right_box_width
+                
+            # Ensure line matches total width
+            result.append(line.ljust(total_width))
+            
+        return result
+    
+    def _create_single_child_connector(self, parent_center: int, child_center: int, is_left_child: bool, 
+                                      total_width: int) -> str:
+        """
+        Create a connector line to a single child node.
+        
+        Args:
+            parent_center (int): Center position of the parent node
+            child_center (int): Center position of the child node
+            is_left_child (bool): Whether it's a left child
+            total_width (int): Total width
+            
+        Returns:
+            str: Connector line string
+        """
+        if parent_center == child_center:
+            # Centers aligned, use simple connector
+            return (" " * parent_center + "┴").ljust(total_width)
+        
+        # Need horizontal connector
+        if is_left_child:
+            # Left child connection
+            if parent_center > child_center:
+                # Parent to the right of child
+                connector = " " * (child_center - 1) + "┌" + "─" * (parent_center - child_center - 1) + "┴"
+            else:
+                # Parent to the left of child
+                connector = " " * parent_center + "┴" + "─" * (child_center - parent_center - 1) + "┐"
+        else:
+            # Right child connection
+            if parent_center < child_center:
+                # Parent to the left of child
+                connector = " " * (parent_center - 1) + "┌" + "─" * (child_center - parent_center - 1) + "┐"
+            else:
+                # Parent to the right of child
+                connector = " " * (child_center - 1) + "┌" + "─" * (parent_center - child_center - 1) + "┴"
+                
+        return connector.ljust(total_width)
+    
     def generate_tree_visual(self, abs_position: int = 0):
         """
-        Generate a visual representation of the tree structure with node information.
+        Generate a visual representation of the tree structure including node information.
         
         Args:
             abs_position (int): Current absolute position in the concatenated sequence
             
         Returns:
-            Tuple[List[str], int, int]: A tuple containing:
+            Tuple[List[str], int, int]: Contains:
                 - List of strings representing the tree structure
                 - Total length of this subtree
                 - Height of this subtree
         """
-        # First collect node information and positions
+        # First recursively process left and right subtrees
         left_lines, left_length, left_height = [], 0, 0
         if self.left:
             left_lines, left_length, left_height = self.left.generate_tree_visual(abs_position)
@@ -436,213 +628,77 @@ class SequenceNode:
         if self.right:
             right_lines, right_length, right_height = self.right.generate_tree_visual(current_position + self.length)
         
-        # Node information
-        node_type = "REF" if self.is_reference else "SEQ"
-        end_position = current_position + self.length - 1  # -1 for 0-based indexing
+        # Create node information
+        node_label, node_width, node_line = self._create_node_info(current_position)
         
-        metadata_str = ""
-        if self.metadata and self.is_reference:
-            metadata_str = f" [iter:{self.metadata.get('iteration', '?')},pos:{self.metadata.get('rel_pos', '?')}]"
-        
-        # Node content (truncated if too long)
-        content_str = self.content[:10] + "..." if len(self.content) > 10 else self.content
-        
-        # Format node label
-        node_label = f"{node_type}|{current_position}-{end_position}|{self.length}{metadata_str}"
-        
-        # Calculate node width - ensure frame can accommodate text
-        node_width = len(node_label) + 4  # Add frame and some padding
-        
-        # Center the node label
-        node_line = node_label.center(node_width - 2, ' ')  # -2 for frame characters
-        
-        # Prepare result lines for this node and its subtrees
-        result = []
-        
-        # Calculate height of this subtree
+        # Calculate this subtree height
         height = max(left_height, right_height) + 1
         
         # Handle leaf node case
         if not self.left and not self.right:
-            result.append("┌" + "─" * (node_width - 2) + "┐")
-            result.append("│" + node_line + "│")
-            result.append("└" + "─" * (node_width - 2) + "┘")
-            return result, self.length, 1
+            return self._create_leaf_visual(node_width, node_line)
         
         # Handle nodes with children
-        # Calculate space needed for aligning children
-        left_width = len(left_lines[0]) if left_lines else 0
-        right_width = len(right_lines[0]) if right_lines else 0
+        # Create node box
+        result = self._create_node_box(node_line, node_width)
         
-        # Create the node box
-        result.append("┌" + "─" * (node_width - 2) + "┐")
-        result.append("│" + node_line + "│")
-        result.append("└" + "─" * (node_width - 2) + "┘")
+        # Calculate subtree width
+        left_box_width = len(left_lines[0]) if left_lines else 0
+        right_box_width = len(right_lines[0]) if right_lines else 0
+        parent_center = node_width // 2
         
-        # Add connecting lines to children
         if self.left and self.right:
             # Both children exist
-            # Get size of boxes for positioning
-            left_box_width = len(left_lines[0]) if left_lines else 0
-            right_box_width = len(right_lines[0]) if right_lines else 0
-            
-            # Calculate positions for better alignment
-            parent_center = node_width // 2
-            
-            # Calculate left and right child centers based on their box widths
+            # Calculate child node center positions
             left_child_center = left_box_width // 2
             right_child_center = right_box_width // 2
             
-            # Calculate total width needed (with spacing)
-            spacing = 8  # Spacing between the left and right subtrees
+            # Calculate layout
+            spacing = 8  # Left and right subtree spacing
             total_width = left_box_width + spacing + right_box_width
-            
-            # Position the left and right children with space between them
-            left_box_pos = 0
             right_box_pos = left_box_width + spacing
             
-            # Calculate positions for fork line to connect to children
-            left_conn_pos = left_box_pos + left_child_center
+            # Calculate connection line positions
+            left_conn_pos = left_child_center
             right_conn_pos = right_box_pos + right_child_center
             
-            # Create fork line
-            # First determine where the fork center should be
-            if parent_center >= left_conn_pos and parent_center <= right_conn_pos:
-                # Parent is between children - ideal case
-                fork_center = parent_center
-            elif parent_center < left_conn_pos:
-                # Parent is to the left of both children
-                fork_center = left_conn_pos
-            else:
-                # Parent is to the right of both children
-                fork_center = right_conn_pos
-            
-            # Create the fork line
-            fork_line = ""
-            
-            # Add spaces until left connection position
-            if left_conn_pos > 0:
-                fork_line += " " * (left_conn_pos - 1)
-                
-            # Add left part of fork
-            fork_line += "┌"
-            
-            # Add horizontal line to fork center
-            if fork_center > left_conn_pos + 1:
-                fork_line += "─" * (fork_center - left_conn_pos - 1)
-                
-            # Add fork junction
-            fork_line += "┴"
-            
-            # Add horizontal line to right connection
-            if right_conn_pos > fork_center + 1:
-                fork_line += "─" * (right_conn_pos - fork_center - 1)
-                
-            # Add right part of fork
-            fork_line += "┐"
-            
-            # Add padding to match total width
-            if len(fork_line) < total_width:
-                fork_line += " " * (total_width - len(fork_line))
-                
+            # Create and add fork line
+            fork_line = self._create_fork_line(parent_center, left_conn_pos, right_conn_pos, total_width)
             result.append(fork_line)
             
-            # Add the children side by side
-            for i in range(max(len(left_lines), len(right_lines))):
-                line = ""
-                
-                # Add left child line if it exists
-                if i < len(left_lines):
-                    line += left_lines[i]
-                else:
-                    line += " " * left_box_width
-                    
-                # Add spacing
-                line += " " * (right_box_pos - len(line))
-                
-                # Add right child line if it exists
-                if i < len(right_lines):
-                    line += right_lines[i]
-                else:
-                    line += " " * right_box_width
-                    
-                # Ensure line matches total width
-                if len(line) < total_width:
-                    line += " " * (total_width - len(line))
-                    
-                result.append(line)
-                
+            # Add and align child trees
+            child_lines = self._align_child_trees(
+                left_lines, right_lines, left_box_width, right_box_width, right_box_pos, total_width)
+            result.extend(child_lines)
+            
         elif self.left:
-            # Only left child exists
-            parent_center = node_width // 2
-            left_child_center = left_width // 2
+            # Only left child
+            left_child_center = left_box_width // 2
+            total_width = max(node_width, left_box_width)
             
-            # Total width needed
-            total_width = max(node_width, left_width)
+            # Create connection line
+            connector = self._create_single_child_connector(parent_center, left_child_center, True, total_width)
+            result.append(connector)
             
-            # Create horizontal connector using only the specified characters
-            connector_line = ""
+            # Add left subtree, ensure width consistency
+            result.extend([line.ljust(total_width) for line in left_lines])
             
-            if parent_center != left_child_center:
-                # Left side connection
-                if parent_center > left_child_center:
-                    # Parent is to the right of child
-                    connector_line += " " * (left_child_center - 1) + "┌" + "─" * (parent_center - left_child_center - 1) + "┴"
-                else:
-                    # Parent is to the left of child
-                    connector_line += " " * parent_center + "┴" + "─" * (left_child_center - parent_center - 1) + "┐"
-            else:
-                # Centers align, use a simpler connector
-                connector_line += " " * parent_center + "┴"
-            
-            # Add padding
-            if len(connector_line) < total_width:
-                connector_line += " " * (total_width - len(connector_line))
-                
-            result.append(connector_line)
-            
-            # Add left subtree
-            for line in left_lines:
-                padded_line = line
-                if len(padded_line) < total_width:
-                    padded_line += " " * (total_width - len(padded_line))
-                result.append(padded_line)
-                
         elif self.right:
-            # Only right child exists
-            parent_center = node_width // 2
-            
-            # Calculate position and width
-            right_child_center = right_width // 2
-            right_pos = max(0, parent_center - right_child_center)
-            total_width = max(node_width, right_pos + right_width)
-            
-            # Create horizontal connector using only specified characters
-            connector_line = ""
-            
-            if parent_center != right_pos + right_child_center:
-                # Need horizontal connector
-                left_pos = min(parent_center, right_pos + right_child_center)
-                right_pos = max(parent_center, right_pos + right_child_center)
-                
-                connector_line += " " * (left_pos - 1) + "┌" + "─" * (right_pos - left_pos - 1) + "┐"
-            else:
-                # Centers align, use a simpler connector
-                connector_line += " " * parent_center + "┴"
-                
-            # Add padding
-            if len(connector_line) < total_width:
-                connector_line += " " * (total_width - len(connector_line))
-                
-            result.append(connector_line)
-            
-            # Add right subtree
+            # Only right child
+            right_child_center = right_box_width // 2
             right_offset = max(0, parent_center - right_child_center)
-            for line in right_lines:
-                padded_line = " " * right_offset + line
-                if len(padded_line) < total_width:
-                    padded_line += " " * (total_width - len(padded_line))
-                result.append(padded_line)
+            total_width = max(node_width, right_offset + right_box_width)
+            
+            # Calculate right subtree connection center
+            right_tree_center = right_offset + right_child_center
+            
+            # Create connection line
+            connector = self._create_single_child_connector(parent_center, right_tree_center, False, total_width)
+            result.append(connector)
+            
+            # Add right subtree, ensure correct alignment and width
+            padded_right_lines = [" " * right_offset + line for line in right_lines]
+            result.extend([line.ljust(total_width) for line in padded_right_lines])
         
         return result, left_length + self.length + right_length, height
 
