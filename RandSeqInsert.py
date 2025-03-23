@@ -764,7 +764,7 @@ class SeqGenerator:
     def __init__(self, input_file: str, insertion: int, iteration: int, batch: int, processors: int, output_dir: str,
                  ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
                  ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
-                 flag_visualize: bool = False):
+                 flag_visual: bool = False):
         """
         Initialize the sequence generator.
 
@@ -780,7 +780,7 @@ class SeqGenerator:
             ref_len_limit (int, optional): Maximum length limit for reference sequences to load
             flag_filter_n (bool): Whether to filter out sequences containing N
             flag_track (bool): Whether to track reference sequences used
-            flag_visualize (bool): Whether to generate tree visualization files
+            flag_visual (bool): Whether to generate tree visualization files
         """
         self.input_file = input_file
         self.insertion = insertion
@@ -791,7 +791,7 @@ class SeqGenerator:
         self.ref_len_limit = ref_len_limit
         self.flag_filter_n = flag_filter_n
         self.flag_track = flag_track
-        self.flag_visualize = flag_visualize
+        self.flag_visualize = flag_visual
 
         # Load input sequence
         self.input = list(SeqIO.parse(input_file, "fasta"))
@@ -1185,7 +1185,7 @@ def main():
                                 help="Filter out sequences containing N. Enable this option to exclude reference sequences containing N bases.")
     flag_group.add_argument("--track", action="store_true",
                        help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
-    flag_group.add_argument("--visualize", action="store_true",
+    flag_group.add_argument("--visual", action="store_true",
                        help="生成序列插入可视化文件，以文本形式展示原始序列和参考序列的嵌套关系")
 
     parsed_args = parser.parse_args()
@@ -1201,7 +1201,7 @@ def main():
     ref_len_limit = parsed_args.limit
     flag_filter_n = parsed_args.filter_n
     flag_track = parsed_args.track
-    flag_visualize = parsed_args.visualize
+    flag_visual = parsed_args.visual
 
     generator = SeqGenerator(
         input_file=input_file,
@@ -1215,7 +1215,7 @@ def main():
         ref_len_limit=ref_len_limit,
         flag_filter_n=flag_filter_n,
         flag_track=flag_track,
-        flag_visualize=flag_visualize
+        flag_visual=flag_visual
     )
     generator.execute()
 
