@@ -830,9 +830,8 @@ class SequenceNode:
                 print(line, file=output_file)
             
             print("", file=output_file)
-            if page < page_count - 1:
-                print("=" * max_width, file=output_file)
-                print("", file=output_file)
+            print("-" * max_width, file=output_file)
+            print("", file=output_file)
 
 
 class SeqGenerator:
