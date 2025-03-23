@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Random DNA Sequence Generator with Insertion
+Random DNA Sequence Insertion Generator
 
 This program takes an input DNA sequence and performs random insertions using sequences
 from a reference library. It supports multiprocessing for efficient sequence generation.
@@ -24,7 +24,6 @@ INFO = ("by Tianyu (Sky) Lu (tlu83@wisc.edu)\n"
         "WARN: Visualization part is not fully functional and has bugs")
 
 # PRE-DEFINED PARAMETERS
-NUCLEOTIDES = ["A", "T", "G", "C"]
 DEFAULT_ALLOCATED_CPU_CORES = os.cpu_count() - 2 if os.cpu_count() > 2 else 1
 DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqInsert-Result"
 
