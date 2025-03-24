@@ -32,6 +32,93 @@ DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_P
 
 # ======================================================================================================================
 
+# TSD (Target Site Duplication) Functions
+def add_snp_mutation(tsd_5, tsd_3, mutate_5_end=True):
+    """Add a single SNP mutation to either 5' or 3' end of TSD.
+    
+    Args:
+        tsd_5 (str): Current 5' TSD sequence
+        tsd_3 (str): Current 3' TSD sequence
+        mutate_5_end (bool): Whether to mutate 5' end (True) or 3' end (False)
+        
+    Returns:
+        tuple: (5' TSD sequence, 3' TSD sequence)
+    """
+    # Get the sequence to modify
+    seq_to_modify = tsd_5 if mutate_5_end else tsd_3
+    
+    # Choose random position and new base (different from original)
+    pos = random.randrange(len(seq_to_modify))
+    curr_base = seq_to_modify[pos]
+    new_base = random.choice(list(set("ATGC") - {curr_base}))
+    
+    # Apply mutation
+    modified_seq = seq_to_modify[:pos] + new_base + seq_to_modify[pos+1:]
+    
+    # Return updated sequences
+    return (modified_seq, tsd_3) if mutate_5_end else (tsd_5, modified_seq)
+
+def add_indel_mutation(tsd_5, tsd_3, mutate_5_end=True):
+    """Add a single indel mutation to either 5' or 3' end of TSD.
+    
+    Args:
+        tsd_5 (str): Current 5' TSD sequence
+        tsd_3 (str): Current 3' TSD sequence
+        mutate_5_end (bool): Whether to mutate 5' end (True) or 3' end (False)
+        
+    Returns:
+        tuple: (5' TSD sequence, 3' TSD sequence)
+    """
+    tsd_len = len(tsd_5)  # Assuming tsd_5 and tsd_3 are the same length
+    
+    # 50% chance for insertion vs deletion
+    is_insertion = random.choice([True, False])
+    
+    # Choose random position (avoiding the very end to simplify edge cases)
+    pos = random.randrange(max(1, tsd_len - 1))
+    new_base = random.choice("ATGC")
+    
+    # Get the sequence to modify
+    seq_to_modify = tsd_5 if mutate_5_end else tsd_3
+    
+    # Apply mutation
+    if is_insertion:
+        # Insert at position and remove last base to maintain length
+        modified_seq = seq_to_modify[:pos] + new_base + seq_to_modify[pos:-1]
+    else:
+        # Delete base and add random base at end to maintain length
+        modified_seq = seq_to_modify[:pos] + seq_to_modify[pos+1:] + new_base
+    
+    # Return updated sequences
+    return (modified_seq, tsd_3) if mutate_5_end else (tsd_5, modified_seq)
+
+def generate_tsd(seq_slice, length=float("inf"), snp=0, indel=0):
+    """Generate TSD sequences based on target site sequence.
+    
+    Args:
+        seq_slice (str): Target site sequence slice
+        length (int): TSD length, if not specified, use the length of the seq_slice
+        snp (float): Probability of SNP mutation
+        indel (float): Probability of indel mutation
+    Returns:
+        tuple: (5' TSD sequence, 3' TSD sequence)
+    """
+    # Extract TSD sequence from target site
+    length = min(len(seq_slice), length)
+    tsd = seq_slice[:length]
+    tsd_5 = tsd_3 = tsd
+
+    # Apply mutations based on probability
+    if random.random() < snp:
+        tsd_5, tsd_3 = add_snp_mutation(tsd_5, tsd_3, random.choice([True, False]))
+
+    if random.random() < indel:
+        tsd_5, tsd_3 = add_indel_mutation(tsd_5, tsd_3, random.choice([True, False]))
+
+    return tsd_5, tsd_3
+
+# ======================================================================================================================
+
 
 class SequenceNode:
     """
@@ -110,7 +197,25 @@ class SequenceNode:
             rel_pos = abs_position - node_start
             left_content = self.content[:rel_pos]
             right_content = self.content[rel_pos:]
-
+            
+            # Handle TSD generation if requested in metadata
+            tsd_length = ref_metadata.get("tsd_length", 0) if ref_metadata else 0
+            if tsd_length > 0:
+                # Extract source TSD sequence from the original sequence
+                # We extract from the right side of the split point (beginning of right_content)
+                source_tsd_seq = right_content[:min(tsd_length, len(right_content))]
+                
+                # Generate TSD sequences (potentially with mutations)
+                tsd_5, tsd_3 = generate_tsd(source_tsd_seq, tsd_length)
+                
+                # Remove source TSD from right_content as it will be duplicated
+                if len(source_tsd_seq) > 0:
+                    right_content = right_content[len(source_tsd_seq):]
+                
+                # Add TSD sequences to the left and right content
+                left_content = left_content + tsd_5
+                right_content = tsd_3 + right_content
+            
             # Create new left child with left content
             new_left = SequenceNode(left_content, self.is_reference, self.metadata)
             if self.left:
@@ -419,7 +524,8 @@ class SeqGenerator:
 
     def __init__(self, input_file: str, insertion: int, batch: int, processors: int, output_dir: str,
                  ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
-                 ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False):
+                 ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
+                 tsd_length: Optional[int] = None):
         """
         Initialize the sequence generator.
 
@@ -434,6 +540,7 @@ class SeqGenerator:
             ref_len_limit (int, optional): Maximum length limit for reference sequences to load
             flag_filter_n (bool): Whether to filter out sequences containing N
             flag_track (bool): Whether to track reference sequences used
+            tsd_length (int, optional): Length of Target Site Duplication (TSD) to generate
         """
         self.input_file = input_file
         self.insertion = insertion
@@ -443,6 +550,7 @@ class SeqGenerator:
         self.ref_len_limit = ref_len_limit
         self.flag_filter_n = flag_filter_n
         self.flag_track = flag_track
+        self.tsd_length = tsd_length
 
         # Load input sequence
         self.input = list(SeqIO.parse(input_file, "fasta"))
@@ -493,12 +601,14 @@ class SeqGenerator:
         
         # Insert references directly into the tree in optimal order
         for pos, ref_seq in zip(insert_positions, selected_refs):
-            metadata = {}
+            metadata = {"tsd_length": self.tsd_length} if self.tsd_length else {}
             root = root.insert(pos, ref_seq, metadata)
         
         # Generate final sequence
         final_seq = str(root)
         new_id = f"{seq_record.id}_ins{self.insertion}"
+        if self.tsd_length:
+            new_id += f"_tsd{self.tsd_length}"
         new_seq_record = create_sequence_record(final_seq, new_id)
         
         # Only collect reference sequences if tracking is enabled
@@ -671,6 +781,8 @@ class SeqGenerator:
         print(f"Processing input file: {self.input_file}")
         print(f"Number of input sequences: {len(self.input)}")
         print(f"Insertion settings: {self.insertion} insertions per sequence")
+        if self.tsd_length:
+            print(f"TSD settings: Generating TSD of length {self.tsd_length} at insertion sites")
         print(f"Reference library: {len(self.ref_sequences)} sequences loaded")
         print(f"Generating {self.batch} independent result file(s)")
 
@@ -750,6 +862,8 @@ def main():
                                 help="Filter out sequences containing N. Enable this option to exclude reference sequences containing N bases.")
     flag_group.add_argument("--track", action="store_true",
                        help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
+    flag_group.add_argument("--tsd", type=int, metavar="LENGTH",
+                       help="Enable Target Site Duplication (TSD) with specified length. When a reference sequence is inserted, TSD of this length will be generated at the insertion site.")
 
     parsed_args = parser.parse_args()
 
@@ -763,6 +877,7 @@ def main():
     ref_len_limit = parsed_args.limit
     flag_filter_n = parsed_args.filter_n
     flag_track = parsed_args.track
+    tsd_length = parsed_args.tsd
 
     generator = SeqGenerator(
         input_file=input_file,
@@ -774,7 +889,8 @@ def main():
         ref_lib_weight=ref_lib_weight,
         ref_len_limit=ref_len_limit,
         flag_filter_n=flag_filter_n,
-        flag_track=flag_track
+        flag_track=flag_track,
+        tsd_length=tsd_length
     )
     generator.execute()
 
