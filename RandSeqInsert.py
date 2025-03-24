@@ -40,7 +40,677 @@ DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_P
 # ======================================================================================================================
 
 
-def sort_multiple_lists(base: list, *lists: list, 
+class SequenceNode:
+    """
+    Node in a sequence tree structure, used for efficient sequence insertion operations.
+    """
+    def __init__(self, content: str, is_reference: bool = False, metadata = None):
+        """
+        Initialize a sequence node.
+
+        Args:
+            content (str): The sequence content
+            is_reference (bool): Whether this node contains a reference sequence
+            metadata: Additional information about the node (such as iteration and position)
+        """
+        self.content = content
+        self.length = len(content)
+        self.is_reference = is_reference
+        self.metadata = metadata
+        self.left = None
+        self.right = None
+        # Total length of the subtree for efficient traversal
+        self.total_length = self.length
+
+    def __str__(self) -> str:
+        """
+        Convert the tree to a string by in-order traversal.
+
+        Returns:
+            str: The concatenated sequence
+        """
+        return "".join(self.collect_content_in_order_traversal())
+
+    def __update_total_length(self):
+        """
+        Update the total length of this subtree.
+
+        This method recalculates the total length of the subtree rooted at this node
+        by summing the lengths of the left subtree, the current node, and the right subtree.
+        """
+        left_length = self.left.total_length if self.left else 0
+        right_length = self.right.total_length if self.right else 0
+        self.total_length = left_length + self.length + right_length
+
+    def insert(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
+        """
+        Insert a reference sequence at the absolute position in the tree.
+
+        Args:
+            abs_position (int): Absolute position in the tree to insert at
+            ref_seq (str): Reference sequence to insert
+            ref_metadata: Metadata for the reference
+
+        Returns:
+            SequenceNode: Root node after insertion
+        """
+        # Calculate positions in tree
+        left_length = self.left.total_length if self.left else 0
+
+        # Fast path: Position is before this node
+        if abs_position <= left_length:
+            if self.left:
+                self.left = self.left.insert(abs_position, ref_seq, ref_metadata)
+            else:
+                # Insert as left child
+                self.left = SequenceNode(ref_seq, True, ref_metadata)
+            self.__update_total_length()
+            return self
+
+        # Position is within this node
+        node_start = left_length
+        node_end = node_start + self.length
+
+        # Fast path: Position is within this node
+        if node_start < abs_position < node_end:
+            # Split this node
+            rel_pos = abs_position - node_start
+            left_content = self.content[:rel_pos]
+            right_content = self.content[rel_pos:]
+
+            # Create new left child with left content
+            new_left = SequenceNode(left_content, self.is_reference, self.metadata)
+            if self.left:
+                new_left.left = self.left
+                new_left.__update_total_length()
+
+            # Create new right child with right content and original right child
+            new_right = SequenceNode(right_content, self.is_reference, self.metadata)
+            if self.right:
+                new_right.right = self.right
+                new_right.__update_total_length()
+
+            # Replace this node's content with the reference
+            self.content = ref_seq
+            self.length = len(ref_seq)
+            self.is_reference = True
+            self.metadata = ref_metadata
+
+            # Set new children
+            self.left = new_left
+            self.right = new_right
+            self.__update_total_length()
+
+            return self
+
+        # Fast path: Position is after this node
+        if abs_position >= node_end:
+            if self.right:
+                self.right = self.right.insert(abs_position - node_end, ref_seq, ref_metadata)
+            else:
+                # Insert as right child
+                self.right = SequenceNode(ref_seq, True, ref_metadata)
+            self.__update_total_length()
+            return self
+
+        raise RuntimeError("[ERROR] Should not reach here")
+
+    def collect_content_in_order_traversal(self):
+        """
+        Helper method to collect node content in in-order traversal.
+        """
+        result = []
+        if self.left:
+            result.extend(self.left.collect_content_in_order_traversal())
+
+        result.append(self.content)
+
+        if self.right:
+            result.extend(self.right.collect_content_in_order_traversal())
+
+        return result
+
+    def collect_refs(self, seq_id: str, abs_position: int = 0):
+        """
+        Collect reference nodes and calculate their absolute positions.
+
+        Args:
+            seq_id (str): ID of the original sequence
+            abs_position (int): Current absolute position in the concatenated sequence
+
+        Returns:
+            Tuple[List[SeqRecord], int]: A tuple containing:
+                - List of reference records
+                - The total length of this subtree
+        """
+        ref_records = []
+
+        left_length = 0
+        if self.left:
+            left_refs, left_length = self.left.collect_refs(seq_id, abs_position)
+            ref_records.extend(left_refs)
+
+        current_position = abs_position + left_length
+
+        if self.is_reference:
+            # Create a reference record with absolute position
+            start_index = current_position
+            end_index = start_index + self.length
+            ref_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
+            ref_record = create_sequence_record(self.content, ref_id)
+            ref_records.append(ref_record)
+
+        right_length = 0
+        if self.right:
+            right_refs, right_length = self.right.collect_refs(seq_id, current_position + self.length)
+            ref_records.extend(right_refs)
+
+        return ref_records, left_length + self.length + right_length
+
+    # ==================================================================================================================
+    # Tree Visualization (Part 1)
+
+    def __create_node_info(self, current_position: int) -> tuple:
+        """
+        Create node information.
+
+        Args:
+            current_position (int): The absolute position of the current node in the sequence
+
+        Returns:
+            tuple: Contains node label, node width, and centered node line
+        """
+        # Node type and position information
+        node_type = "REF" if self.is_reference else "SEQ"
+        end_position = current_position + self.length - 1  # -1 for 0-based index
+
+        # Metadata information
+        metadata_str = ""
+        if self.metadata and self.is_reference:
+            metadata_str = f" [iter:{self.metadata.get('iteration', '?')}]"
+
+        # Format node label
+        node_label = f"{node_type}|{current_position}-{end_position}|{self.length}{metadata_str}"
+
+        # Calculate node width and ensure frame can accommodate text
+        node_width = len(node_label) + 4  # Add frame and some padding
+
+        # Center node label
+        node_line = node_label.center(node_width - 2, ' ')  # -2 for frame characters
+
+        return node_label, node_width, node_line
+
+    def generate_tree_visual(self, abs_position: int = 0):
+        """
+        Generate a visual representation of the tree structure including node information.
+
+        Args:
+            abs_position (int): Current absolute position in the concatenated sequence
+
+        Returns:
+            Tuple[List[str], int, int]: Contains:
+                - List of strings representing the tree structure
+                - Total length of this subtree
+                - Height of this subtree
+        """
+        # First recursively process left and right subtrees
+        left_lines, left_length, left_height = [], 0, 0
+        if self.left:
+            left_lines, left_length, left_height = self.left.generate_tree_visual(abs_position)
+
+        current_position = abs_position + left_length
+
+        right_lines, right_length, right_height = [], 0, 0
+        if self.right:
+            right_lines, right_length, right_height = self.right.generate_tree_visual(current_position + self.length)
+
+        # Create node information
+        node_label, node_width, node_line = self.__create_node_info(current_position)
+
+        # Calculate this subtree height
+        height = max(left_height, right_height) + 1
+
+        # Handle leaf node case
+        if not self.left and not self.right:
+            return _create_leaf_visual(self, node_width, node_line)
+
+        # Handle nodes with children
+        # Create node box
+        result = _create_node_box(node_line, node_width)
+
+        # Calculate subtree width
+        left_box_width = len(left_lines[0]) if left_lines else 0
+        right_box_width = len(right_lines[0]) if right_lines else 0
+        parent_center = node_width // 2
+
+        if self.left and self.right:
+            # Both children exist
+            # Calculate child node center positions
+            left_child_center = left_box_width // 2
+            right_child_center = right_box_width // 2
+
+            # Calculate layout
+            spacing = 8  # Left and right subtree spacing
+            total_width = left_box_width + spacing + right_box_width
+            right_box_pos = left_box_width + spacing
+
+            # Calculate connection line positions
+            left_conn_pos = left_child_center
+            right_conn_pos = right_box_pos + right_child_center
+
+            # Create and add fork line
+            fork_line = _create_fork_line(parent_center, left_conn_pos, right_conn_pos, total_width)
+            result.append(fork_line)
+
+            # Add and align child trees
+            child_lines = _align_child_trees(
+                left_lines, right_lines, left_box_width, right_box_width, right_box_pos, total_width)
+            result.extend(child_lines)
+
+        elif self.left:
+            # Only left child
+            left_child_center = left_box_width // 2
+            total_width = max(node_width, left_box_width)
+
+            # Create connection line
+            connector = _create_single_child_connector(parent_center, left_child_center, True, total_width)
+            result.append(connector)
+
+            # Add left subtree, ensure width consistency
+            result.extend([line.ljust(total_width) for line in left_lines])
+
+        elif self.right:
+            # Only right child
+            right_child_center = right_box_width // 2
+            right_offset = max(0, parent_center - right_child_center)
+            total_width = max(node_width, right_offset + right_box_width)
+
+            # Calculate right subtree connection center
+            right_tree_center = right_offset + right_child_center
+
+            # Create connection line
+            connector = _create_single_child_connector(parent_center, right_tree_center, False, total_width)
+            result.append(connector)
+
+            # Add right subtree, ensure correct alignment and width
+            padded_right_lines = [" " * right_offset + line for line in right_lines]
+            result.extend([line.ljust(total_width) for line in padded_right_lines])
+
+        return result, left_length + self.length + right_length, height
+
+    # ==================================================================================================================
+    # Sequence Visualization
+
+    def collect_sequence_structure(self, abs_position=0):
+        """
+        Collect sequence structure information for visualization
+
+        Args:
+            abs_position (int): Absolute start position of the node in the complete sequence
+
+        Returns:
+            list: List of tuples containing (node, start_position, end_position, depth)
+        """
+        result = []
+
+        # Process left subtree
+        if self.left:
+            result.extend(self.left.collect_sequence_structure(abs_position))
+
+        # Calculate current node position
+        left_length = self.left.total_length if self.left else 0
+        start_pos = abs_position + left_length
+        end_pos = start_pos + self.length - 1
+
+        # Add current node
+        result.append((self, start_pos, end_pos, 0))
+
+        # Process right subtree
+        if self.right:
+            right_pos = start_pos + self.length
+            result.extend(self.right.collect_sequence_structure(right_pos))
+
+        return result
+
+
+def generate_sequence_visual(root_node, output_file, max_width=80):
+    """
+    Create visualization of the entire sequence
+
+    Args:
+        root_node: Root node of the sequence structure
+        output_file: Output file object
+        max_width (int): Maximum width of output
+    """
+    # Collect sequence structure information
+    structure = root_node.collect_sequence_structure()
+
+    # Sort by position
+    structure.sort(key=lambda x: (x[1], -x[2]))
+
+    # Calculate nesting depth
+    for i, (node, start, end, _) in enumerate(structure):
+        # Find all parent nodes for this node
+        depth = 0
+        for parent_node, parent_start, parent_end, _ in structure:
+            if parent_node != node and parent_start <= start and parent_end >= end:
+                depth += 1
+        # Update node depth
+        structure[i] = (node, start, end, depth)
+
+    # Output visualization
+    total_length = structure[-1][2] + 1  # Last node end position + 1
+
+    # Determine length range for each page - using global constants for dynamic calculation
+    page_size = max_width * VIZ_PAGE_SIZE_FACTOR  # Dynamically calculate sequence length per page
+    page_count = (total_length + page_size - 1) // page_size
+
+    for page in range(page_count):
+        page_start = page * page_size
+        page_end = min((page + 1) * page_size - 1, total_length - 1)
+
+        # Calculate current page length
+        current_page_length = page_end - page_start + 1
+
+        # Print page title
+        if page_count > 1:
+            print(f"Sequence section {page+1}/{page_count}: Positions {page_start}-{page_end}", file=output_file)
+            print("-" * max_width, file=output_file)
+            print(file=output_file)
+
+        # Filter nodes within current page range
+        page_nodes = [(node, start, end, depth) for node, start, end, depth in structure
+                      if not (end < page_start or start > page_end)]
+
+        # Generate visualization line for each node
+        for node, start, end, depth in page_nodes:
+            # Calculate start and end positions on page
+            vis_start = max(start, page_start)
+            vis_end = min(end, page_end)
+
+            # Calculate visible node length on current page
+            visible_length = vis_end - vis_start + 1
+
+            # Calculate percentage of page length occupied by node
+            length_percentage = visible_length / current_page_length
+
+            # Indent to show nesting relationship
+            indent = "  " * depth
+
+            # Determine node type
+            node_type = "REF" if node.is_reference else "SEQ"
+
+            # Get sequence preview - fix short sequence issue
+            if len(node.content) <= VIZ_SEQ_PREVIEW_LENGTH * 2:
+                # For short sequences, display half content at start and end
+                preview_length = len(node.content) // 2
+                if preview_length == 0:  # Handle extremely short sequences
+                    preview_length = 1 if len(node.content) > 0 else 0
+                start_preview = node.content[:preview_length]
+                end_preview = node.content[-preview_length:] if preview_length > 0 else ""
+            else:
+                # Normal case
+                start_preview = node.content[:VIZ_SEQ_PREVIEW_LENGTH]
+                end_preview = node.content[-VIZ_SEQ_PREVIEW_LENGTH:]
+
+            # Calculate available width, ensure it doesn't exceed maximum width
+            available_width = (max_width - len(indent) - len(str(start)) - len(str(end)) -
+                               len(start_preview) - len(end_preview) - len(node_type) - len(str(node.length)) - 20)
+
+            # Ensure available_width is not negative
+            available_width = max(1, available_width)
+
+            # Calculate number of symbols based on percentage and available width, using global constant limit
+            symbols_count = max(1, min(available_width, int(length_percentage * VIZ_MAX_SYMBOLS)))
+
+            # Use different symbols for different node types
+            symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
+
+            # Generate node visualization line, ensure it doesn't exceed maximum width
+            line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
+
+            # If line is too long, use maximum width and add ">>>" indicator
+            if len(line) > max_width:
+                excess = len(line) - max_width + 3  # Reserve space for ">>>"
+                symbols_count = max(1, symbols_count - excess // 2)
+                symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
+
+                # Regenerate line, replace ending "|" with ">>>"
+                line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} >>>"
+
+            print(line, file=output_file)
+
+        print(file=output_file)
+        print("-" * max_width, file=output_file)
+        print(file=output_file)
+
+
+def visualize_sequence(seq_id, root_node, output_dir):
+    """
+    Create visualization file for specified sequence
+
+    Args:
+        seq_id (str): Sequence ID
+        root_node (SequenceNode): Root node of the sequence
+        output_dir (str): Output directory
+    """
+    # Create visualization directory
+    viz_dir = os.path.join(output_dir, "seq_visualization")
+    os.makedirs(viz_dir, exist_ok=True)
+
+    # Create visualization file
+    viz_filename = f"{seq_id}_visualization.txt"
+    viz_path = os.path.join(viz_dir, viz_filename)
+
+    with open(viz_path, 'w') as f:
+        # Add title
+        f.write(f"Sequence Visualization: {seq_id}\n")
+        f.write("="*VIZ_MAX_WIDTH + "\n\n")
+        f.write("Legend:\n")
+        f.write("- SEQ: Original sequence node\n")
+        f.write("- REF: Inserted reference sequence node\n")
+        f.write("- Numbers represent sequence positions in the complete sequence\n")
+        f.write(f"- Left and right sides show actual sequence content (first and last {VIZ_SEQ_PREVIEW_LENGTH} bases)\n")
+        f.write("- Indentation shows nesting level\n\n")
+        f.write("="*VIZ_MAX_WIDTH + "\n\n")
+
+        generate_sequence_visual(root_node, f, max_width=VIZ_MAX_WIDTH)
+
+
+# ======================================================================================================================
+# Tree Visualization (Part 2)
+
+
+def _create_leaf_visual(node, node_width: int, node_line: str) -> tuple:
+    """
+    Create visual representation for a leaf node.
+
+    Args:
+        node_width (int): Node width
+        node_line (str): Node content line
+
+    Returns:
+        tuple: Contains list of strings representing the visual, node length, and height
+    """
+    result = _create_node_box(node_line, node_width)
+    return result, node.length, 1
+
+
+def _create_node_box(node_line: str, node_width: int) -> list:
+    """
+    Create a node box.
+
+    Args:
+        node_line (str): Node content line
+        node_width (int): Node width
+
+    Returns:
+        list: List of strings containing the node box
+    """
+    return [
+        "┌" + "─" * (node_width - 2) + "┐",
+        "│" + node_line + "│",
+        "└" + "─" * (node_width - 2) + "┘"
+    ]
+
+
+def _create_fork_line(parent_center: int, left_conn_pos: int, right_conn_pos: int, total_width: int) -> str:
+    """
+    Create a fork line connecting two child nodes.
+
+    Args:
+        parent_center (int): Center position of the parent node
+        left_conn_pos (int): Connection position for the left child
+        right_conn_pos (int): Connection position for the right child
+        total_width (int): Total width
+
+    Returns:
+        str: Fork line string
+    """
+    # Determine fork center position
+    if left_conn_pos <= parent_center <= right_conn_pos:
+        # Parent between children - ideal case
+        fork_center = parent_center
+    elif parent_center < left_conn_pos:
+        # Parent to the left of both children
+        fork_center = left_conn_pos
+    else:
+        # Parent to the right of both children
+        fork_center = right_conn_pos
+
+    # Build fork line
+    parts = []
+
+    # Add left padding
+    if left_conn_pos > 0:
+        parts.append(" " * (left_conn_pos - 1))
+
+    # Add left fork
+    parts.append("┌")
+
+    # Add horizontal line to fork center
+    if fork_center > left_conn_pos + 1:
+        parts.append("─" * (fork_center - left_conn_pos - 1))
+
+    # Add fork connection point
+    parts.append("┴")
+
+    # Add horizontal line to right connection
+    if right_conn_pos > fork_center + 1:
+        parts.append("─" * (right_conn_pos - fork_center - 1))
+
+    # Add right fork
+    parts.append("┐")
+
+    fork_line = "".join(parts)
+
+    # Add padding to match total width
+    return fork_line.ljust(total_width)
+
+
+def _align_child_trees(left_lines: list, right_lines: list, left_box_width: int, right_box_width: int,
+                       right_box_pos: int, total_width: int) -> list:
+    """
+    Align and merge left and right subtree visualizations.
+
+    Args:
+        left_lines (list): List of lines for left subtree
+        right_lines (list): List of lines for right subtree
+        left_box_width (int): Width of left subtree box
+        right_box_width (int): Width of right subtree box
+        right_box_pos (int): Position of right subtree box
+        total_width (int): Total width
+
+    Returns:
+        list: Merged subtree lines
+    """
+    result = []
+    max_lines = max(len(left_lines), len(right_lines))
+
+    for i in range(max_lines):
+        # Add left subtree line
+        if i < len(left_lines):
+            line = left_lines[i]
+        else:
+            line = " " * left_box_width
+
+        # Add spacing
+        line = line.ljust(right_box_pos)
+
+        # Add right subtree line
+        if i < len(right_lines):
+            line += right_lines[i]
+        else:
+            line += " " * right_box_width
+
+        # Ensure line matches total width
+        result.append(line.ljust(total_width))
+
+    return result
+
+
+def _create_single_child_connector(parent_center: int, child_center: int, is_left_child: bool,
+                                   total_width: int) -> str:
+    """
+    Create a connector line to a single child node.
+
+    Args:
+        parent_center (int): Center position of the parent node
+        child_center (int): Center position of the child node
+        is_left_child (bool): Whether it's a left child
+        total_width (int): Total width
+
+    Returns:
+        str: Connector line string
+    """
+    if parent_center == child_center:
+        # Centers aligned, use simple connector
+        return (" " * parent_center + "┴").ljust(total_width)
+
+    # Need horizontal connector
+    if is_left_child:
+        # Left child connection
+        if parent_center > child_center:
+            # Parent to the right of child
+            connector = " " * (child_center - 1) + "┌" + "─" * (parent_center - child_center - 1) + "┴"
+        else:
+            # Parent to the left of child
+            connector = " " * parent_center + "┴" + "─" * (child_center - parent_center - 1) + "┐"
+    else:
+        # Right child connection
+        if parent_center < child_center:
+            # Parent to the left of child
+            connector = " " * (parent_center - 1) + "┌" + "─" * (child_center - parent_center - 1) + "┐"
+        else:
+            # Parent to the right of child
+            connector = " " * (child_center - 1) + "┌" + "─" * (parent_center - child_center - 1) + "┴"
+
+    return connector.ljust(total_width)
+
+
+def _save_tree_structure_visualization(output_dir: str, tree_visuals: Dict[str, List[str]], suffix: str = ""):
+    """
+    Save tree structure visualizations to a file.
+
+    Args:
+        output_dir (str): Directory to save the visualization file
+        tree_visuals (Dict[str, List[str]]): Dictionary mapping sequence IDs to tree visualization lines
+        suffix (str): Suffix to add to the output filename
+    """
+    tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
+    with open(tree_file_path, 'w', encoding='utf-8') as tree_file:
+        for seq_id, lines in tree_visuals.items():
+            tree_file.write(f"=== Tree Structure Visualization: {seq_id} ===\n")
+            tree_file.write("Node Format: Type|Start-End|Length[Metadata]\n")
+            tree_file.write("SEQ: Original sequence node, REF: Inserted reference sequence node\n\n")
+            tree_file.write("\n".join(lines))
+            tree_file.write("\n\n" + "="*80 + "\n\n")
+
+
+# ======================================================================================================================
+
+
+def sort_multiple_lists(base: list, *lists: list,
                         key: Optional[Callable] = None, reverse: bool = False) -> Union[list, tuple]:
     """
     Synchronously sorts multiple lists based on the sorting order of the base list `base`.
@@ -50,7 +720,7 @@ def sort_multiple_lists(base: list, *lists: list,
         *lists (list): Other lists to be sorted synchronously
         key (callable, optional): A function to execute to decide the order. Default is None.
         reverse (bool, optional): Whether to sort in descending order. Default is False.
-    
+
     Returns:
         tuple: A tuple containing all sorted lists. The first element is the sorted base list,
         the rest are the sorted lists in the same order as they were passed in.
@@ -104,7 +774,7 @@ def save_multi_fasta_from_dict(records_dict: Dict[str, List[SeqRecord]], output_
     Save multiple FASTA files from a dictionary of sequence records.
 
     Args:
-        records_dict (Dict[str, List[SeqRecord]]): Dictionary mapping file names to lists of SeqRecord objects    
+        records_dict (Dict[str, List[SeqRecord]]): Dictionary mapping file names to lists of SeqRecord objects
         output_dir_path (str): Directory path where the output files will be saved
     """
     os.makedirs(output_dir_path, exist_ok=True)
@@ -133,9 +803,9 @@ def load_sequences(path_list: Optional[List[str]], len_limit: Optional[int] = No
 
     ref_sequences: List[str] = []
     for file_path in path_list:
-            ref_sequences.extend([str(record.seq.upper()) for record in SeqIO.parse(file_path, "fasta") if
-                                  (len(record) <= len_limit if len_limit else True) and
-                                  ("N" not in record.seq.upper() if flag_filter_n else True)])
+        ref_sequences.extend([str(record.seq.upper()) for record in SeqIO.parse(file_path, "fasta") if
+                              (len(record) <= len_limit if len_limit else True) and
+                              ("N" not in record.seq.upper() if flag_filter_n else True)])
 
     ref_sequences.sort(key=len)
     return ref_sequences
@@ -240,623 +910,12 @@ def _load_multiple_ref_libs(path_list: List[str], weight_list: Optional[List[flo
     # return sort_multiple_lists(all_ref_sequence_list, all_ref_weight_list, key=len)
     all_ref_len_list, all_ref_sequence_list, all_ref_weight_list = sort_multiple_lists(
         all_ref_len_list, all_ref_sequence_list, all_ref_weight_list)
-    
+
     # Uniform weights by default: If no weight provided, set all weights to 1
     if not weight_list:
         all_ref_weight_list = [1] * len(all_ref_sequence_list)
 
     return all_ref_sequence_list, all_ref_len_list, all_ref_weight_list
-
-
-class SequenceNode:
-    """
-    Node in a sequence tree structure, used for efficient sequence insertion operations.
-    """
-    def __init__(self, content: str, is_reference: bool = False, metadata = None):
-        """
-        Initialize a sequence node.
-        
-        Args:
-            content (str): The sequence content
-            is_reference (bool): Whether this node contains a reference sequence
-            metadata: Additional information about the node (such as iteration and position)
-        """
-        self.content = content
-        self.length = len(content)
-        self.is_reference = is_reference
-        self.metadata = metadata
-        self.left = None
-        self.right = None
-        # Total length of the subtree for efficient traversal
-        self.total_length = self.length
-    
-    def __update_total_length(self):
-        """
-        Update the total length of this subtree.
-        
-        This method recalculates the total length of the subtree rooted at this node
-        by summing the lengths of the left subtree, the current node, and the right subtree.
-        """
-        left_length = self.left.total_length if self.left else 0
-        right_length = self.right.total_length if self.right else 0
-        self.total_length = left_length + self.length + right_length
-    
-    def insert(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
-        """
-        Insert a reference sequence at the absolute position in the tree.
-        
-        Args:
-            abs_position (int): Absolute position in the tree to insert at
-            ref_seq (str): Reference sequence to insert
-            ref_metadata: Metadata for the reference
-            
-        Returns:
-            SequenceNode: Root node after insertion
-        """
-        # Calculate positions in tree
-        left_length = self.left.total_length if self.left else 0
-        
-        # Fast path: Position is before this node
-        if abs_position <= left_length:
-            if self.left:
-                self.left = self.left.insert(abs_position, ref_seq, ref_metadata)
-            else:
-                # Insert as left child
-                self.left = SequenceNode(ref_seq, True, ref_metadata)
-            self.__update_total_length()
-            return self
-        
-        # Position is within this node
-        node_start = left_length
-        node_end = node_start + self.length
-        
-        # Fast path: Position is within this node
-        if node_start < abs_position < node_end:
-            # Split this node
-            rel_pos = abs_position - node_start
-            left_content = self.content[:rel_pos]
-            right_content = self.content[rel_pos:]
-            
-            # Create new left child with left content
-            new_left = SequenceNode(left_content, self.is_reference, self.metadata)
-            if self.left:
-                new_left.left = self.left
-                new_left.__update_total_length()
-            
-            # Create new right child with right content and original right child
-            new_right = SequenceNode(right_content, self.is_reference, self.metadata)
-            if self.right:
-                new_right.right = self.right
-                new_right.__update_total_length()
-            
-            # Replace this node's content with the reference
-            self.content = ref_seq
-            self.length = len(ref_seq)
-            self.is_reference = True
-            self.metadata = ref_metadata
-            
-            # Set new children
-            self.left = new_left
-            self.right = new_right
-            self.__update_total_length()
-            
-            return self
-        
-        # Fast path: Position is after this node
-        if abs_position >= node_end:
-            if self.right:
-                self.right = self.right.insert(abs_position - node_end, ref_seq, ref_metadata)
-            else:
-                # Insert as right child
-                self.right = SequenceNode(ref_seq, True, ref_metadata)
-            self.__update_total_length()
-            return self
-        
-        return self  # Should not reach here
-    
-    def __str__(self) -> str:
-        """
-        Convert the tree to a string by in-order traversal.
-        
-        Returns:
-            str: The concatenated sequence
-        """
-        result = []
-        self.__collect_content(result)
-        return "".join(result)
-    
-    def __collect_content(self, result: list):
-        """
-        Helper method to collect node content in in-order traversal.
-        
-        Args:
-            result (list): List to store content strings
-        """
-        if self.left:
-            self.left.__collect_content(result)
-        
-        result.append(self.content)
-        
-        if self.right:
-            self.right.__collect_content(result)
-    
-    def collect_refs(self, seq_id: str, abs_position: int = 0):
-        """
-        Collect reference nodes and calculate their absolute positions.
-        
-        Args:
-            seq_id (str): ID of the original sequence
-            abs_position (int): Current absolute position in the concatenated sequence
-        
-        Returns:
-            Tuple[List[SeqRecord], int]: A tuple containing:
-                - List of reference records
-                - The total length of this subtree
-        """
-        ref_records = []
-        
-        left_length = 0
-        if self.left:
-            left_refs, left_length = self.left.collect_refs(seq_id, abs_position)
-            ref_records.extend(left_refs)
-        
-        current_position = abs_position + left_length
-        
-        if self.is_reference:
-            # Create a reference record with absolute position
-            start_index = current_position
-            end_index = start_index + self.length
-            ref_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
-            ref_record = create_sequence_record(self.content, ref_id)
-            ref_records.append(ref_record)
-        
-        right_length = 0
-        if self.right:
-            right_refs, right_length = self.right.collect_refs(seq_id, current_position + self.length)
-            ref_records.extend(right_refs)
-        
-        return ref_records, left_length + self.length + right_length
-    
-    # ==================================================================================================================
-    # Tree Visualization
-
-    def __create_node_info(self, current_position: int) -> tuple:
-        """
-        Create node information.
-        
-        Args:
-            current_position (int): The absolute position of the current node in the sequence
-            
-        Returns:
-            tuple: Contains node label, node width, and centered node line
-        """
-        # Node type and position information
-        node_type = "REF" if self.is_reference else "SEQ"
-        end_position = current_position + self.length - 1  # -1 for 0-based index
-        
-        # Metadata information
-        metadata_str = ""
-        if self.metadata and self.is_reference:
-            metadata_str = f" [iter:{self.metadata.get('iteration', '?')}]"
-        
-        # Format node label
-        node_label = f"{node_type}|{current_position}-{end_position}|{self.length}{metadata_str}"
-        
-        # Calculate node width and ensure frame can accommodate text
-        node_width = len(node_label) + 4  # Add frame and some padding
-        
-        # Center node label
-        node_line = node_label.center(node_width - 2, ' ')  # -2 for frame characters
-        
-        return node_label, node_width, node_line
-    
-    def __create_node_box(self, node_line: str, node_width: int) -> list:
-        """
-        Create a node box.
-        
-        Args:
-            node_line (str): Node content line
-            node_width (int): Node width
-            
-        Returns:
-            list: List of strings containing the node box
-        """
-        return [
-            "┌" + "─" * (node_width - 2) + "┐",
-            "│" + node_line + "│",
-            "└" + "─" * (node_width - 2) + "┘"
-        ]
-    
-    def __create_leaf_visual(self, node_width: int, node_line: str) -> tuple:
-        """
-        Create visual representation for a leaf node.
-        
-        Args:
-            node_width (int): Node width
-            node_line (str): Node content line
-            
-        Returns:
-            tuple: Contains list of strings representing the visual, node length, and height
-        """
-        result = self.__create_node_box(node_line, node_width)
-        return result, self.length, 1
-    
-    def __create_fork_line(self, parent_center: int, left_conn_pos: int, right_conn_pos: int, total_width: int) -> str:
-        """
-        Create a fork line connecting two child nodes.
-        
-        Args:
-            parent_center (int): Center position of the parent node
-            left_conn_pos (int): Connection position for the left child
-            right_conn_pos (int): Connection position for the right child
-            total_width (int): Total width
-            
-        Returns:
-            str: Fork line string
-        """
-        # Determine fork center position
-        if left_conn_pos <= parent_center <= right_conn_pos:
-            # Parent between children - ideal case
-            fork_center = parent_center
-        elif parent_center < left_conn_pos:
-            # Parent to the left of both children
-            fork_center = left_conn_pos
-        else:
-            # Parent to the right of both children
-            fork_center = right_conn_pos
-        
-        # Build fork line
-        parts = []
-        
-        # Add left padding
-        if left_conn_pos > 0:
-            parts.append(" " * (left_conn_pos - 1))
-            
-        # Add left fork
-        parts.append("┌")
-        
-        # Add horizontal line to fork center
-        if fork_center > left_conn_pos + 1:
-            parts.append("─" * (fork_center - left_conn_pos - 1))
-            
-        # Add fork connection point
-        parts.append("┴")
-        
-        # Add horizontal line to right connection
-        if right_conn_pos > fork_center + 1:
-            parts.append("─" * (right_conn_pos - fork_center - 1))
-            
-        # Add right fork
-        parts.append("┐")
-        
-        fork_line = "".join(parts)
-        
-        # Add padding to match total width
-        return fork_line.ljust(total_width)
-    
-    def __align_child_trees(self, left_lines: list, right_lines: list, left_box_width: int, right_box_width: int, 
-                          right_box_pos: int, total_width: int) -> list:
-        """
-        Align and merge left and right subtree visualizations.
-        
-        Args:
-            left_lines (list): List of lines for left subtree
-            right_lines (list): List of lines for right subtree
-            left_box_width (int): Width of left subtree box
-            right_box_width (int): Width of right subtree box
-            right_box_pos (int): Position of right subtree box
-            total_width (int): Total width
-            
-        Returns:
-            list: Merged subtree lines
-        """
-        result = []
-        max_lines = max(len(left_lines), len(right_lines))
-        
-        for i in range(max_lines):
-            # Add left subtree line
-            if i < len(left_lines):
-                line = left_lines[i]
-            else:
-                line = " " * left_box_width
-                
-            # Add spacing
-            line = line.ljust(right_box_pos)
-            
-            # Add right subtree line
-            if i < len(right_lines):
-                line += right_lines[i]
-            else:
-                line += " " * right_box_width
-                
-            # Ensure line matches total width
-            result.append(line.ljust(total_width))
-            
-        return result
-    
-    def __create_single_child_connector(self, parent_center: int, child_center: int, is_left_child: bool, 
-                                      total_width: int) -> str:
-        """
-        Create a connector line to a single child node.
-        
-        Args:
-            parent_center (int): Center position of the parent node
-            child_center (int): Center position of the child node
-            is_left_child (bool): Whether it's a left child
-            total_width (int): Total width
-            
-        Returns:
-            str: Connector line string
-        """
-        if parent_center == child_center:
-            # Centers aligned, use simple connector
-            return (" " * parent_center + "┴").ljust(total_width)
-        
-        # Need horizontal connector
-        if is_left_child:
-            # Left child connection
-            if parent_center > child_center:
-                # Parent to the right of child
-                connector = " " * (child_center - 1) + "┌" + "─" * (parent_center - child_center - 1) + "┴"
-            else:
-                # Parent to the left of child
-                connector = " " * parent_center + "┴" + "─" * (child_center - parent_center - 1) + "┐"
-        else:
-            # Right child connection
-            if parent_center < child_center:
-                # Parent to the left of child
-                connector = " " * (parent_center - 1) + "┌" + "─" * (child_center - parent_center - 1) + "┐"
-            else:
-                # Parent to the right of child
-                connector = " " * (child_center - 1) + "┌" + "─" * (parent_center - child_center - 1) + "┴"
-                
-        return connector.ljust(total_width)
-    
-    def generate_tree_visual(self, abs_position: int = 0):
-        """
-        Generate a visual representation of the tree structure including node information.
-        
-        Args:
-            abs_position (int): Current absolute position in the concatenated sequence
-            
-        Returns:
-            Tuple[List[str], int, int]: Contains:
-                - List of strings representing the tree structure
-                - Total length of this subtree
-                - Height of this subtree
-        """
-        # First recursively process left and right subtrees
-        left_lines, left_length, left_height = [], 0, 0
-        if self.left:
-            left_lines, left_length, left_height = self.left.generate_tree_visual(abs_position)
-        
-        current_position = abs_position + left_length
-        
-        right_lines, right_length, right_height = [], 0, 0
-        if self.right:
-            right_lines, right_length, right_height = self.right.generate_tree_visual(current_position + self.length)
-        
-        # Create node information
-        node_label, node_width, node_line = self.__create_node_info(current_position)
-        
-        # Calculate this subtree height
-        height = max(left_height, right_height) + 1
-        
-        # Handle leaf node case
-        if not self.left and not self.right:
-            return self.__create_leaf_visual(node_width, node_line)
-        
-        # Handle nodes with children
-        # Create node box
-        result = self.__create_node_box(node_line, node_width)
-        
-        # Calculate subtree width
-        left_box_width = len(left_lines[0]) if left_lines else 0
-        right_box_width = len(right_lines[0]) if right_lines else 0
-        parent_center = node_width // 2
-        
-        if self.left and self.right:
-            # Both children exist
-            # Calculate child node center positions
-            left_child_center = left_box_width // 2
-            right_child_center = right_box_width // 2
-            
-            # Calculate layout
-            spacing = 8  # Left and right subtree spacing
-            total_width = left_box_width + spacing + right_box_width
-            right_box_pos = left_box_width + spacing
-            
-            # Calculate connection line positions
-            left_conn_pos = left_child_center
-            right_conn_pos = right_box_pos + right_child_center
-            
-            # Create and add fork line
-            fork_line = self.__create_fork_line(parent_center, left_conn_pos, right_conn_pos, total_width)
-            result.append(fork_line)
-            
-            # Add and align child trees
-            child_lines = self.__align_child_trees(
-                left_lines, right_lines, left_box_width, right_box_width, right_box_pos, total_width)
-            result.extend(child_lines)
-            
-        elif self.left:
-            # Only left child
-            left_child_center = left_box_width // 2
-            total_width = max(node_width, left_box_width)
-            
-            # Create connection line
-            connector = self.__create_single_child_connector(parent_center, left_child_center, True, total_width)
-            result.append(connector)
-            
-            # Add left subtree, ensure width consistency
-            result.extend([line.ljust(total_width) for line in left_lines])
-            
-        elif self.right:
-            # Only right child
-            right_child_center = right_box_width // 2
-            right_offset = max(0, parent_center - right_child_center)
-            total_width = max(node_width, right_offset + right_box_width)
-            
-            # Calculate right subtree connection center
-            right_tree_center = right_offset + right_child_center
-            
-            # Create connection line
-            connector = self.__create_single_child_connector(parent_center, right_tree_center, False, total_width)
-            result.append(connector)
-            
-            # Add right subtree, ensure correct alignment and width
-            padded_right_lines = [" " * right_offset + line for line in right_lines]
-            result.extend([line.ljust(total_width) for line in padded_right_lines])
-        
-        return result, left_length + self.length + right_length, height
-
-    # ==================================================================================================================
-    # Sequence Visualization
-
-    def __collect_sequence_structure(self, abs_position=0):
-        """
-        Collect sequence structure information for visualization
-        
-        Args:
-            abs_position (int): Absolute start position of the node in the complete sequence
-            
-        Returns:
-            list: List of tuples containing (node, start_position, end_position, depth)
-        """
-        result = []
-        
-        # Process left subtree
-        if self.left:
-            result.extend(self.left.__collect_sequence_structure(abs_position))
-        
-        # Calculate current node position
-        left_length = self.left.total_length if self.left else 0
-        start_pos = abs_position + left_length
-        end_pos = start_pos + self.length - 1
-        
-        # Add current node
-        result.append((self, start_pos, end_pos, 0))
-        
-        # Process right subtree
-        if self.right:
-            right_pos = start_pos + self.length
-            result.extend(self.right.__collect_sequence_structure(right_pos))
-        
-        return result
-    
-    def generate_sequence_visual(self, output_file, max_width=80, seq_id=None):
-        """
-        Create visualization of the entire sequence
-        
-        Args:
-            output_file: Output file object
-            max_width (int): Maximum width of output
-            seq_id (str): Sequence ID
-        """
-        # Collect sequence structure information
-        structure = self.__collect_sequence_structure()
-        
-        # Sort by position
-        structure.sort(key=lambda x: (x[1], -x[2]))
-        
-        # Calculate nesting depth
-        node_depths = {}
-        for i, (node, start, end, _) in enumerate(structure):
-            # Find all parent nodes for this node
-            depth = 0
-            for parent_node, parent_start, parent_end, _ in structure:
-                if parent_node != node and parent_start <= start and parent_end >= end:
-                    depth += 1
-            # Update node depth
-            structure[i] = (node, start, end, depth)
-        
-        # Output visualization
-        total_length = structure[-1][2] + 1  # Last node end position + 1
-        
-        # Determine length range for each page - using global constants for dynamic calculation
-        page_size = max_width * VIZ_PAGE_SIZE_FACTOR  # Dynamically calculate sequence length per page
-        page_count = (total_length + page_size - 1) // page_size
-        
-        for page in range(page_count):
-            page_start = page * page_size
-            page_end = min((page + 1) * page_size - 1, total_length - 1)
-            
-            # Calculate current page length
-            current_page_length = page_end - page_start + 1
-            
-            # Print page title
-            if page_count > 1:
-                print(f"Sequence section {page+1}/{page_count}: Positions {page_start}-{page_end}", file=output_file)
-                print("-" * max_width, file=output_file)
-                print(file=output_file)
-            
-            # Filter nodes within current page range
-            page_nodes = [(node, start, end, depth) for node, start, end, depth in structure 
-                         if not (end < page_start or start > page_end)]
-            
-            # Generate visualization line for each node
-            for node, start, end, depth in page_nodes:
-                # Calculate start and end positions on page
-                vis_start = max(start, page_start)
-                vis_end = min(end, page_end)
-                
-                # Calculate visible node length on current page
-                visible_length = vis_end - vis_start + 1
-                
-                # Calculate percentage of page length occupied by node
-                length_percentage = visible_length / current_page_length
-                
-                # Indent to show nesting relationship
-                indent = "  " * depth
-                
-                # Determine node type
-                node_type = "REF" if node.is_reference else "SEQ"
-                
-                # Get sequence preview - fix short sequence issue
-                if len(node.content) <= VIZ_SEQ_PREVIEW_LENGTH * 2:
-                    # For short sequences, display half content at start and end
-                    preview_length = len(node.content) // 2
-                    if preview_length == 0:  # Handle extremely short sequences
-                        preview_length = 1 if len(node.content) > 0 else 0
-                    start_preview = node.content[:preview_length]
-                    end_preview = node.content[-preview_length:] if preview_length > 0 else ""
-                else:
-                    # Normal case
-                    start_preview = node.content[:VIZ_SEQ_PREVIEW_LENGTH]
-                    end_preview = node.content[-VIZ_SEQ_PREVIEW_LENGTH:]
-                
-                # Calculate available width, ensure it doesn't exceed maximum width
-                available_width = (max_width - len(indent) - len(str(start)) - len(str(end)) - 
-                                   len(start_preview) - len(end_preview) - len(node_type) - len(str(node.length)) - 20)
-                
-                # Ensure available_width is not negative
-                available_width = max(1, available_width)
-                
-                # Calculate number of symbols based on percentage and available width, using global constant limit
-                symbols_count = max(1, min(available_width, int(length_percentage * VIZ_MAX_SYMBOLS)))
-                
-                # Use different symbols for different node types
-                symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
-                
-                # Generate node visualization line, ensure it doesn't exceed maximum width
-                line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
-                
-                # If line is too long, use maximum width and add ">>>" indicator
-                if len(line) > max_width:
-                    excess = len(line) - max_width + 3  # Reserve space for ">>>"
-                    symbols_count = max(1, symbols_count - excess // 2)
-                    symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
-                    
-                    # Regenerate line, replace ending "|" with ">>>"
-                    line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} >>>"
-                
-                print(line, file=output_file)
-            
-            print(file=output_file)
-            print("-" * max_width, file=output_file)
-            print(file=output_file)
-
-    # ==================================================================================================================
 
 
 class SeqGenerator:
@@ -918,9 +977,9 @@ class SeqGenerator:
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
-    def __process_single_sequence(self, seq_record: SeqRecord, seq_num: int) -> Tuple[SeqRecord, 
-                                                                                  Optional[List[SeqRecord]],
-                                                                                  Optional[SequenceNode]]:
+    def __process_single_sequence(self, seq_record: SeqRecord) -> Tuple[SeqRecord,
+                                                                        Optional[List[SeqRecord]],
+                                                                        Optional[SequenceNode]]:
         """
         Process a single sequence through all iterations using a tree-based algorithm.
         Directly navigates the tree for insertions without rebuilding it.
@@ -931,7 +990,6 @@ class SeqGenerator:
         
         Args:
             seq_record (SeqRecord): The input sequence record
-            seq_num (int): The sequence number
             
         Returns:
             Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[SequenceNode]]: 
@@ -964,7 +1022,7 @@ class SeqGenerator:
         
         # Generate visualization (if enabled)
         if self.flag_visualize:
-            self.visualize_sequence(seq_record.id, root, self.output_dir)
+            visualize_sequence(seq_record.id, root, self.output_dir)
         
         # Only collect reference sequences if tracking is enabled
         used_refs = None
@@ -1002,7 +1060,7 @@ class SeqGenerator:
         
         for i in range(start_idx, end_idx):
             seq_record = self.input[i]
-            processed_seq, refs, root_node = self.__process_single_sequence(seq_record, i + 1)
+            processed_seq, refs, root_node = self.__process_single_sequence(seq_record)
             processed_seqs.append(processed_seq)
             
             if self.flag_track and refs:
@@ -1073,7 +1131,7 @@ class SeqGenerator:
         all_tree_visuals = {} if self.flag_visualize else None
         
         for i, seq_record in enumerate(self.input):
-            processed_seq, refs, root_node = self.__process_single_sequence(seq_record, i + 1)
+            processed_seq, refs, root_node = self.__process_single_sequence(seq_record)
             all_sequences.append(processed_seq)
             
             if self.flag_track and refs:
@@ -1149,27 +1207,9 @@ class SeqGenerator:
         
         if self.flag_visualize:
             print(f"Saving tree structure visualizations")
-            self.__save_tree_structure_visualization(output_dir, tree_visuals, suffix)
+            _save_tree_structure_visualization(output_dir, tree_visuals, suffix)
         
         save_multi_fasta_from_dict(output_dict, output_dir)
-        
-    def __save_tree_structure_visualization(self, output_dir: str, tree_visuals: Dict[str, List[str]], suffix: str = ""):
-        """
-        Save tree structure visualizations to a file.
-        
-        Args:
-            output_dir (str): Directory to save the visualization file
-            tree_visuals (Dict[str, List[str]]): Dictionary mapping sequence IDs to tree visualization lines
-            suffix (str): Suffix to add to the output filename
-        """
-        tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
-        with open(tree_file_path, 'w', encoding='utf-8') as tree_file:
-            for seq_id, lines in tree_visuals.items():
-                tree_file.write(f"=== Tree Structure Visualization: {seq_id} ===\n")
-                tree_file.write("Node Format: Type|Start-End|Length[Metadata]\n")
-                tree_file.write("SEQ: Original sequence node, REF: Inserted reference sequence node\n\n")
-                tree_file.write("\n".join(lines))
-                tree_file.write("\n\n" + "="*80 + "\n\n")
 
     def __print_header(self):
         """
@@ -1219,37 +1259,6 @@ class SeqGenerator:
         total_elapsed_time = time.time() - start_time
         self.__print_summary(total_elapsed_time)
 
-    def visualize_sequence(self, seq_id, root_node, output_dir):
-        """
-        Create visualization file for specified sequence
-        
-        Args:
-            seq_id (str): Sequence ID
-            root_node (SequenceNode): Root node of the sequence
-            output_dir (str): Output directory
-        """
-        # Create visualization directory
-        viz_dir = os.path.join(output_dir, "seq_visualization")
-        os.makedirs(viz_dir, exist_ok=True)
-        
-        # Create visualization file
-        viz_filename = f"{seq_id}_visualization.txt"
-        viz_path = os.path.join(viz_dir, viz_filename)
-        
-        with open(viz_path, 'w') as f:
-            # Add title
-            f.write(f"Sequence Visualization: {seq_id}\n")
-            f.write("="*VIZ_MAX_WIDTH + "\n\n")
-            f.write("Legend:\n")
-            f.write("- SEQ: Original sequence node\n")
-            f.write("- REF: Inserted reference sequence node\n")
-            f.write("- Numbers represent sequence positions in the complete sequence\n")
-            f.write(f"- Left and right sides show actual sequence content (first and last {VIZ_SEQ_PREVIEW_LENGTH} bases)\n")
-            f.write("- Indentation shows nesting level\n\n")
-            f.write("="*VIZ_MAX_WIDTH + "\n\n")
-            
-            root_node.create_sequence_visualization(f, max_width=VIZ_MAX_WIDTH, seq_id=seq_id)
-
 
 def main():
     """Main function to handle command line arguments and execute the program."""
@@ -1267,8 +1276,8 @@ def main():
     core_group.add_argument("-i", "--input",
                        help="Input sequence file in FASTA format. Contains the target sequences to be inserted into.",
                        type=str, required=True, metavar="FILE")
-    core_group.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_REL_PATH, metavar="DIR",
-                       help=f"Output directory path. Generated sequences and related files will be saved here. Default: '{DEFAULT_OUTPUT_DIR_REL_PATH}'")
+    core_group.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_ABS_PATH, metavar="DIR",
+                       help=f"Output directory path. Generated sequences and related files will be saved here. Default: '{DEFAULT_OUTPUT_DIR_ABS_PATH}'")
 
     core_group.add_argument("-is", "--insertion", metavar="INT",
                        help="Number of insertions per sequence. Specifies how many reference sequence fragments to insert into each input sequence per iteration.",
