@@ -19,10 +19,13 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 import time
 
-VERSION = "v0.1.0"
-INFO = ("by Tianyu (Sky) Lu (tlu83@wisc.edu)")
+VERSION = "v1.0.0"
+INFO = ("by Tianyu (Sky) Lu (tianyu@lu.fm)")
 
 # PRE-DEFINED PARAMETERS
+DEFAULT_TSD_SNP_MUTATION_RATE = 0.05
+DEFAULT_TSD_INDEL_MUTATION_RATE = 0.05
+
 DEFAULT_ALLOCATED_CPU_CORES = os.cpu_count() - 2 if os.cpu_count() > 2 else 1
 DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqInsert-Result"
 
@@ -31,91 +34,92 @@ DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_P
 
 
 # ======================================================================================================================
-
 # TSD (Target Site Duplication) Functions
-def add_snp_mutation(tsd_5, tsd_3, mutate_5_end=True):
-    """Add a single SNP mutation to either 5' or 3' end of TSD.
-    
+
+
+def add_snp_mutation(seq: str) -> str:
+    """Add a single SNP mutation at a random position in the sequence.
+
     Args:
-        tsd_5 (str): Current 5' TSD sequence
-        tsd_3 (str): Current 3' TSD sequence
-        mutate_5_end (bool): Whether to mutate 5' end (True) or 3' end (False)
-        
+        seq (str): Input DNA sequence
+
     Returns:
-        tuple: (5' TSD sequence, 3' TSD sequence)
+        str: Mutated sequence (maintaining the same length)
     """
-    # Get the sequence to modify
-    seq_to_modify = tsd_5 if mutate_5_end else tsd_3
-    
-    # Choose random position and new base (different from original)
-    pos = random.randrange(len(seq_to_modify))
-    curr_base = seq_to_modify[pos]
+    if not seq:
+        return seq
+
+    # Randomly choose mutation position
+    pos = random.randrange(len(seq))
+    curr_base = seq[pos]
+    # Choose a different base
     new_base = random.choice(list(set("ATGC") - {curr_base}))
-    
-    # Apply mutation
-    modified_seq = seq_to_modify[:pos] + new_base + seq_to_modify[pos+1:]
-    
-    # Return updated sequences
-    return (modified_seq, tsd_3) if mutate_5_end else (tsd_5, modified_seq)
 
-def add_indel_mutation(tsd_5, tsd_3, mutate_5_end=True):
-    """Add a single indel mutation to either 5' or 3' end of TSD.
-    
+    # Construct mutated sequence
+    return seq[:pos] + new_base + seq[pos+1:]
+
+def add_indel_mutation(seq: str) -> str:
+    """Add a single indel mutation at a random position in the sequence.
+
     Args:
-        tsd_5 (str): Current 5' TSD sequence
-        tsd_3 (str): Current 3' TSD sequence
-        mutate_5_end (bool): Whether to mutate 5' end (True) or 3' end (False)
-        
+        seq (str): Input DNA sequence
+
     Returns:
-        tuple: (5' TSD sequence, 3' TSD sequence)
+        str: Mutated sequence (maintaining the same length)
     """
-    tsd_len = len(tsd_5)  # Assuming tsd_5 and tsd_3 are the same length
-    
-    # 50% chance for insertion vs deletion
+    if len(seq) < 2:
+        return seq
+
+    # 50% probability of insertion or deletion
     is_insertion = random.choice([True, False])
-    
-    # Choose random position (avoiding the very end to simplify edge cases)
-    pos = random.randrange(max(1, tsd_len - 1))
+
+    # Choose mutation position (avoid the last position)
+    pos = random.randrange(len(seq)-1)
     new_base = random.choice("ATGC")
-    
-    # Get the sequence to modify
-    seq_to_modify = tsd_5 if mutate_5_end else tsd_3
-    
-    # Apply mutation
+
     if is_insertion:
-        # Insert at position and remove last base to maintain length
-        modified_seq = seq_to_modify[:pos] + new_base + seq_to_modify[pos:-1]
+        # Insert new base and remove last base to maintain length
+        return seq[:pos] + new_base + seq[pos:-1]
     else:
-        # Delete base and add random base at end to maintain length
-        modified_seq = seq_to_modify[:pos] + seq_to_modify[pos+1:] + new_base
-    
-    # Return updated sequences
-    return (modified_seq, tsd_3) if mutate_5_end else (tsd_5, modified_seq)
+        # Delete base and append random base at the end
+        return seq[:pos] + seq[pos+1:] + new_base
 
-def generate_tsd(seq_slice, length=float("inf"), snp=0, indel=0):
-    """Generate TSD sequences based on target site sequence.
-    
+
+def generate_TSD(seq_slice: str,
+                 length: int = float("inf"),
+                 snp: float = DEFAULT_TSD_SNP_MUTATION_RATE,
+                 indel: float = DEFAULT_TSD_INDEL_MUTATION_RATE) -> Tuple[str, str]:
+    """Generate TSD sequences with potential mutations.
+
     Args:
-        seq_slice (str): Target site sequence slice
-        length (int): TSD length, if not specified, use the length of the seq_slice
-        snp (float): Probability of SNP mutation
-        indel (float): Probability of indel mutation
+        seq_slice (str): Target sequence fragment
+        length (int): TSD length (defaults to seq_slice length)
+        snp (float): SNP mutation probability
+        indel (float): Indel mutation probability
+
     Returns:
-        tuple: (5' TSD sequence, 3' TSD sequence)
+        Tuple[str, str]: (5' TSD sequence, 3' TSD sequence)
     """
-    # Extract TSD sequence from target site
-    length = min(len(seq_slice), length)
-    tsd = seq_slice[:length]
-    tsd_5 = tsd_3 = tsd
+    # Initialize both ends of TSD
+    tsd_length = min(len(seq_slice), length)
+    tsd_5 = tsd_3 = seq_slice[:tsd_length]
 
-    # Apply mutations based on probability
+    # Apply SNP mutation (randomly choose end)
     if random.random() < snp:
-        tsd_5, tsd_3 = add_snp_mutation(tsd_5, tsd_3, random.choice([True, False]))
+        if random.choice([True, False]):
+            tsd_5 = add_snp_mutation(tsd_5)
+        else:
+            tsd_3 = add_snp_mutation(tsd_3)
 
+    # Apply Indel mutation (randomly choose end)
     if random.random() < indel:
-        tsd_5, tsd_3 = add_indel_mutation(tsd_5, tsd_3, random.choice([True, False]))
+        if random.choice([True, False]):
+            tsd_5 = add_indel_mutation(tsd_5)
+        else:
+            tsd_3 = add_indel_mutation(tsd_3)
 
     return tsd_5, tsd_3
+
 
 # ======================================================================================================================
 
@@ -124,7 +128,7 @@ class SequenceNode:
     """
     Node in a sequence tree structure, used for efficient sequence insertion operations.
     """
-    def __init__(self, content: str, is_reference: bool = False, metadata = None):
+    def __init__(self, content: str, is_reference: bool = False, metadata: dict = None):
         """
         Initialize a sequence node.
 
@@ -206,7 +210,7 @@ class SequenceNode:
                 source_tsd_seq = right_content[:min(tsd_length, len(right_content))]
                 
                 # Generate TSD sequences (potentially with mutations)
-                tsd_5, tsd_3 = generate_tsd(source_tsd_seq, tsd_length)
+                tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
                 
                 # Remove source TSD from right_content as it will be duplicated
                 if len(source_tsd_seq) > 0:
@@ -615,9 +619,8 @@ class SeqGenerator:
         used_refs = None
         if self.flag_track:
             used_refs, _ = root.collect_refs(seq_record.id)
-            return new_seq_record, used_refs
         
-        return new_seq_record, None
+        return new_seq_record, used_refs
 
     def _process_chunk(self, chunk_idx: int, chunk_size: int, total_sequences: int) -> Tuple[List[SeqRecord], 
                                                                                           Optional[List[SeqRecord]]]:

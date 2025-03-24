@@ -88,7 +88,7 @@ python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize
 
 ```sh
 # Enable tracking of inserted references
-python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize --track --visual
+python RandSeqInsert.py -i input.fa -is 10 -r lib/TIR/maize --track --tsd 5
 ```
 
 ### Advanced Examples
