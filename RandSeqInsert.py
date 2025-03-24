@@ -20,18 +20,11 @@ from Bio.SeqRecord import SeqRecord
 import time
 
 VERSION = "v0.1.0"
-INFO = ("by Tianyu (Sky) Lu (tlu83@wisc.edu)\n"
-        "WARN: Visualization part is not fully functional and has bugs")
+INFO = ("by Tianyu (Sky) Lu (tlu83@wisc.edu)")
 
 # PRE-DEFINED PARAMETERS
 DEFAULT_ALLOCATED_CPU_CORES = os.cpu_count() - 2 if os.cpu_count() > 2 else 1
 DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqInsert-Result"
-
-# Visualization parameters
-VIZ_MAX_WIDTH = 80  # Maximum width of visualization output (in characters)
-VIZ_SEQ_PREVIEW_LENGTH = 4  # Number of bases to show at start/end in sequence visualization
-VIZ_PAGE_SIZE_FACTOR = 25  # Sequence length per page = VIZ_MAX_WIDTH * VIZ_PAGE_SIZE_FACTOR
-VIZ_MAX_SYMBOLS = 40  # Maximum number of symbols for sequence visualization
 
 PROGRAM_ROOT_DIR_ABS_PATH = os.path.dirname(__file__)
 DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_PATH)
@@ -51,7 +44,7 @@ class SequenceNode:
         Args:
             content (str): The sequence content
             is_reference (bool): Whether this node contains a reference sequence
-            metadata: Additional information about the node (such as iteration and position)
+            metadata: Additional information about the node (such as position)
         """
         self.content = content
         self.length = len(content)
@@ -206,505 +199,6 @@ class SequenceNode:
             ref_records.extend(right_refs)
 
         return ref_records, left_length + self.length + right_length
-
-    # ==================================================================================================================
-    # Tree Visualization (Part 1)
-
-    def __create_node_info(self, current_position: int) -> tuple:
-        """
-        Create node information.
-
-        Args:
-            current_position (int): The absolute position of the current node in the sequence
-
-        Returns:
-            tuple: Contains node label, node width, and centered node line
-        """
-        # Node type and position information
-        node_type = "REF" if self.is_reference else "SEQ"
-        end_position = current_position + self.length - 1  # -1 for 0-based index
-
-        # Metadata information
-        metadata_str = ""
-        if self.metadata and self.is_reference:
-            metadata_str = f" [iter:{self.metadata.get('iteration', '?')}]"
-
-        # Format node label
-        node_label = f"{node_type}|{current_position}-{end_position}|{self.length}{metadata_str}"
-
-        # Calculate node width and ensure frame can accommodate text
-        node_width = len(node_label) + 4  # Add frame and some padding
-
-        # Center node label
-        node_line = node_label.center(node_width - 2, ' ')  # -2 for frame characters
-
-        return node_label, node_width, node_line
-
-    def generate_tree_visual(self, abs_position: int = 0):
-        """
-        Generate a visual representation of the tree structure including node information.
-
-        Args:
-            abs_position (int): Current absolute position in the concatenated sequence
-
-        Returns:
-            Tuple[List[str], int, int]: Contains:
-                - List of strings representing the tree structure
-                - Total length of this subtree
-                - Height of this subtree
-        """
-        # First recursively process left and right subtrees
-        left_lines, left_length, left_height = [], 0, 0
-        if self.left:
-            left_lines, left_length, left_height = self.left.generate_tree_visual(abs_position)
-
-        current_position = abs_position + left_length
-
-        right_lines, right_length, right_height = [], 0, 0
-        if self.right:
-            right_lines, right_length, right_height = self.right.generate_tree_visual(current_position + self.length)
-
-        # Create node information
-        node_label, node_width, node_line = self.__create_node_info(current_position)
-
-        # Calculate this subtree height
-        height = max(left_height, right_height) + 1
-
-        # Handle leaf node case
-        if not self.left and not self.right:
-            return _create_leaf_visual(self, node_width, node_line)
-
-        # Handle nodes with children
-        # Create node box
-        result = _create_node_box(node_line, node_width)
-
-        # Calculate subtree width
-        left_box_width = len(left_lines[0]) if left_lines else 0
-        right_box_width = len(right_lines[0]) if right_lines else 0
-        parent_center = node_width // 2
-
-        if self.left and self.right:
-            # Both children exist
-            # Calculate child node center positions
-            left_child_center = left_box_width // 2
-            right_child_center = right_box_width // 2
-
-            # Calculate layout
-            spacing = 8  # Left and right subtree spacing
-            total_width = left_box_width + spacing + right_box_width
-            right_box_pos = left_box_width + spacing
-
-            # Calculate connection line positions
-            left_conn_pos = left_child_center
-            right_conn_pos = right_box_pos + right_child_center
-
-            # Create and add fork line
-            fork_line = _create_fork_line(parent_center, left_conn_pos, right_conn_pos, total_width)
-            result.append(fork_line)
-
-            # Add and align child trees
-            child_lines = _align_child_trees(
-                left_lines, right_lines, left_box_width, right_box_width, right_box_pos, total_width)
-            result.extend(child_lines)
-
-        elif self.left:
-            # Only left child
-            left_child_center = left_box_width // 2
-            total_width = max(node_width, left_box_width)
-
-            # Create connection line
-            connector = _create_single_child_connector(parent_center, left_child_center, True, total_width)
-            result.append(connector)
-
-            # Add left subtree, ensure width consistency
-            result.extend([line.ljust(total_width) for line in left_lines])
-
-        elif self.right:
-            # Only right child
-            right_child_center = right_box_width // 2
-            right_offset = max(0, parent_center - right_child_center)
-            total_width = max(node_width, right_offset + right_box_width)
-
-            # Calculate right subtree connection center
-            right_tree_center = right_offset + right_child_center
-
-            # Create connection line
-            connector = _create_single_child_connector(parent_center, right_tree_center, False, total_width)
-            result.append(connector)
-
-            # Add right subtree, ensure correct alignment and width
-            padded_right_lines = [" " * right_offset + line for line in right_lines]
-            result.extend([line.ljust(total_width) for line in padded_right_lines])
-
-        return result, left_length + self.length + right_length, height
-
-    # ==================================================================================================================
-    # Sequence Visualization
-
-    def collect_sequence_structure(self, abs_position=0):
-        """
-        Collect sequence structure information for visualization
-
-        Args:
-            abs_position (int): Absolute start position of the node in the complete sequence
-
-        Returns:
-            list: List of tuples containing (node, start_position, end_position, depth)
-        """
-        result = []
-
-        # Process left subtree
-        if self.left:
-            result.extend(self.left.collect_sequence_structure(abs_position))
-
-        # Calculate current node position
-        left_length = self.left.total_length if self.left else 0
-        start_pos = abs_position + left_length
-        end_pos = start_pos + self.length - 1
-
-        # Add current node
-        result.append((self, start_pos, end_pos, 0))
-
-        # Process right subtree
-        if self.right:
-            right_pos = start_pos + self.length
-            result.extend(self.right.collect_sequence_structure(right_pos))
-
-        return result
-
-
-def generate_sequence_visual(root_node, output_file, max_width=80):
-    """
-    Create visualization of the entire sequence
-
-    Args:
-        root_node: Root node of the sequence structure
-        output_file: Output file object
-        max_width (int): Maximum width of output
-    """
-    # Collect sequence structure information
-    structure = root_node.collect_sequence_structure()
-
-    # Sort by position
-    structure.sort(key=lambda x: (x[1], -x[2]))
-
-    # Calculate nesting depth
-    for i, (node, start, end, _) in enumerate(structure):
-        # Find all parent nodes for this node
-        depth = 0
-        for parent_node, parent_start, parent_end, _ in structure:
-            if parent_node != node and parent_start <= start and parent_end >= end:
-                depth += 1
-        # Update node depth
-        structure[i] = (node, start, end, depth)
-
-    # Output visualization
-    total_length = structure[-1][2] + 1  # Last node end position + 1
-
-    # Determine length range for each page - using global constants for dynamic calculation
-    page_size = max_width * VIZ_PAGE_SIZE_FACTOR  # Dynamically calculate sequence length per page
-    page_count = (total_length + page_size - 1) // page_size
-
-    for page in range(page_count):
-        page_start = page * page_size
-        page_end = min((page + 1) * page_size - 1, total_length - 1)
-
-        # Calculate current page length
-        current_page_length = page_end - page_start + 1
-
-        # Print page title
-        if page_count > 1:
-            print(f"Sequence section {page+1}/{page_count}: Positions {page_start}-{page_end}", file=output_file)
-            print("-" * max_width, file=output_file)
-            print(file=output_file)
-
-        # Filter nodes within current page range
-        page_nodes = [(node, start, end, depth) for node, start, end, depth in structure
-                      if not (end < page_start or start > page_end)]
-
-        # Generate visualization line for each node
-        for node, start, end, depth in page_nodes:
-            # Calculate start and end positions on page
-            vis_start = max(start, page_start)
-            vis_end = min(end, page_end)
-
-            # Calculate visible node length on current page
-            visible_length = vis_end - vis_start + 1
-
-            # Calculate percentage of page length occupied by node
-            length_percentage = visible_length / current_page_length
-
-            # Indent to show nesting relationship
-            indent = "  " * depth
-
-            # Determine node type
-            node_type = "REF" if node.is_reference else "SEQ"
-
-            # Get sequence preview - fix short sequence issue
-            if len(node.content) <= VIZ_SEQ_PREVIEW_LENGTH * 2:
-                # For short sequences, display half content at start and end
-                preview_length = len(node.content) // 2
-                if preview_length == 0:  # Handle extremely short sequences
-                    preview_length = 1 if len(node.content) > 0 else 0
-                start_preview = node.content[:preview_length]
-                end_preview = node.content[-preview_length:] if preview_length > 0 else ""
-            else:
-                # Normal case
-                start_preview = node.content[:VIZ_SEQ_PREVIEW_LENGTH]
-                end_preview = node.content[-VIZ_SEQ_PREVIEW_LENGTH:]
-
-            # Calculate available width, ensure it doesn't exceed maximum width
-            available_width = (max_width - len(indent) - len(str(start)) - len(str(end)) -
-                               len(start_preview) - len(end_preview) - len(node_type) - len(str(node.length)) - 20)
-
-            # Ensure available_width is not negative
-            available_width = max(1, available_width)
-
-            # Calculate number of symbols based on percentage and available width, using global constant limit
-            symbols_count = max(1, min(available_width, int(length_percentage * VIZ_MAX_SYMBOLS)))
-
-            # Use different symbols for different node types
-            symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
-
-            # Generate node visualization line, ensure it doesn't exceed maximum width
-            line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} |"
-
-            # If line is too long, use maximum width and add ">>>" indicator
-            if len(line) > max_width:
-                excess = len(line) - max_width + 3  # Reserve space for ">>>"
-                symbols_count = max(1, symbols_count - excess // 2)
-                symbols = "+" * symbols_count if node_type == "SEQ" else "-" * symbols_count
-
-                # Regenerate line, replace ending "|" with ">>>"
-                line = f"{indent}| {start} {start_preview} {symbols} {node_type} ({node.length}) {symbols} {end_preview} {end} >>>"
-
-            print(line, file=output_file)
-
-        print(file=output_file)
-        print("-" * max_width, file=output_file)
-        print(file=output_file)
-
-
-def visualize_sequence(seq_id, root_node, output_dir):
-    """
-    Create visualization file for specified sequence
-
-    Args:
-        seq_id (str): Sequence ID
-        root_node (SequenceNode): Root node of the sequence
-        output_dir (str): Output directory
-    """
-    # Create visualization directory
-    viz_dir = os.path.join(output_dir, "seq_visualization")
-    os.makedirs(viz_dir, exist_ok=True)
-
-    # Create visualization file
-    viz_filename = f"{seq_id}_visualization.txt"
-    viz_path = os.path.join(viz_dir, viz_filename)
-
-    with open(viz_path, 'w') as f:
-        # Add title
-        f.write(f"Sequence Visualization: {seq_id}\n")
-        f.write("="*VIZ_MAX_WIDTH + "\n\n")
-        f.write("Legend:\n")
-        f.write("- SEQ: Original sequence node\n")
-        f.write("- REF: Inserted reference sequence node\n")
-        f.write("- Numbers represent sequence positions in the complete sequence\n")
-        f.write(f"- Left and right sides show actual sequence content (first and last {VIZ_SEQ_PREVIEW_LENGTH} bases)\n")
-        f.write("- Indentation shows nesting level\n\n")
-        f.write("="*VIZ_MAX_WIDTH + "\n\n")
-
-        generate_sequence_visual(root_node, f, max_width=VIZ_MAX_WIDTH)
-
-
-# ======================================================================================================================
-# Tree Visualization (Part 2)
-
-
-def _create_leaf_visual(node, node_width: int, node_line: str) -> tuple:
-    """
-    Create visual representation for a leaf node.
-
-    Args:
-        node_width (int): Node width
-        node_line (str): Node content line
-
-    Returns:
-        tuple: Contains list of strings representing the visual, node length, and height
-    """
-    result = _create_node_box(node_line, node_width)
-    return result, node.length, 1
-
-
-def _create_node_box(node_line: str, node_width: int) -> list:
-    """
-    Create a node box.
-
-    Args:
-        node_line (str): Node content line
-        node_width (int): Node width
-
-    Returns:
-        list: List of strings containing the node box
-    """
-    return [
-        "┌" + "─" * (node_width - 2) + "┐",
-        "│" + node_line + "│",
-        "└" + "─" * (node_width - 2) + "┘"
-    ]
-
-
-def _create_fork_line(parent_center: int, left_conn_pos: int, right_conn_pos: int, total_width: int) -> str:
-    """
-    Create a fork line connecting two child nodes.
-
-    Args:
-        parent_center (int): Center position of the parent node
-        left_conn_pos (int): Connection position for the left child
-        right_conn_pos (int): Connection position for the right child
-        total_width (int): Total width
-
-    Returns:
-        str: Fork line string
-    """
-    # Determine fork center position
-    if left_conn_pos <= parent_center <= right_conn_pos:
-        # Parent between children - ideal case
-        fork_center = parent_center
-    elif parent_center < left_conn_pos:
-        # Parent to the left of both children
-        fork_center = left_conn_pos
-    else:
-        # Parent to the right of both children
-        fork_center = right_conn_pos
-
-    # Build fork line
-    parts = []
-
-    # Add left padding
-    if left_conn_pos > 0:
-        parts.append(" " * (left_conn_pos - 1))
-
-    # Add left fork
-    parts.append("┌")
-
-    # Add horizontal line to fork center
-    if fork_center > left_conn_pos + 1:
-        parts.append("─" * (fork_center - left_conn_pos - 1))
-
-    # Add fork connection point
-    parts.append("┴")
-
-    # Add horizontal line to right connection
-    if right_conn_pos > fork_center + 1:
-        parts.append("─" * (right_conn_pos - fork_center - 1))
-
-    # Add right fork
-    parts.append("┐")
-
-    fork_line = "".join(parts)
-
-    # Add padding to match total width
-    return fork_line.ljust(total_width)
-
-
-def _align_child_trees(left_lines: list, right_lines: list, left_box_width: int, right_box_width: int,
-                       right_box_pos: int, total_width: int) -> list:
-    """
-    Align and merge left and right subtree visualizations.
-
-    Args:
-        left_lines (list): List of lines for left subtree
-        right_lines (list): List of lines for right subtree
-        left_box_width (int): Width of left subtree box
-        right_box_width (int): Width of right subtree box
-        right_box_pos (int): Position of right subtree box
-        total_width (int): Total width
-
-    Returns:
-        list: Merged subtree lines
-    """
-    result = []
-    max_lines = max(len(left_lines), len(right_lines))
-
-    for i in range(max_lines):
-        # Add left subtree line
-        if i < len(left_lines):
-            line = left_lines[i]
-        else:
-            line = " " * left_box_width
-
-        # Add spacing
-        line = line.ljust(right_box_pos)
-
-        # Add right subtree line
-        if i < len(right_lines):
-            line += right_lines[i]
-        else:
-            line += " " * right_box_width
-
-        # Ensure line matches total width
-        result.append(line.ljust(total_width))
-
-    return result
-
-
-def _create_single_child_connector(parent_center: int, child_center: int, is_left_child: bool,
-                                   total_width: int) -> str:
-    """
-    Create a connector line to a single child node.
-
-    Args:
-        parent_center (int): Center position of the parent node
-        child_center (int): Center position of the child node
-        is_left_child (bool): Whether it's a left child
-        total_width (int): Total width
-
-    Returns:
-        str: Connector line string
-    """
-    if parent_center == child_center:
-        # Centers aligned, use simple connector
-        return (" " * parent_center + "┴").ljust(total_width)
-
-    # Need horizontal connector
-    if is_left_child:
-        # Left child connection
-        if parent_center > child_center:
-            # Parent to the right of child
-            connector = " " * (child_center - 1) + "┌" + "─" * (parent_center - child_center - 1) + "┴"
-        else:
-            # Parent to the left of child
-            connector = " " * parent_center + "┴" + "─" * (child_center - parent_center - 1) + "┐"
-    else:
-        # Right child connection
-        if parent_center < child_center:
-            # Parent to the left of child
-            connector = " " * (parent_center - 1) + "┌" + "─" * (child_center - parent_center - 1) + "┐"
-        else:
-            # Parent to the right of child
-            connector = " " * (child_center - 1) + "┌" + "─" * (parent_center - child_center - 1) + "┴"
-
-    return connector.ljust(total_width)
-
-
-def _save_tree_structure_visualization(output_dir: str, tree_visuals: Dict[str, List[str]], suffix: str = ""):
-    """
-    Save tree structure visualizations to a file.
-
-    Args:
-        output_dir (str): Directory to save the visualization file
-        tree_visuals (Dict[str, List[str]]): Dictionary mapping sequence IDs to tree visualization lines
-        suffix (str): Suffix to add to the output filename
-    """
-    tree_file_path = os.path.join(output_dir, f"ins_tree_visual{suffix}.txt")
-    with open(tree_file_path, 'w', encoding='utf-8') as tree_file:
-        for seq_id, lines in tree_visuals.items():
-            tree_file.write(f"=== Tree Structure Visualization: {seq_id} ===\n")
-            tree_file.write("Node Format: Type|Start-End|Length[Metadata]\n")
-            tree_file.write("SEQ: Original sequence node, REF: Inserted reference sequence node\n\n")
-            tree_file.write("\n".join(lines))
-            tree_file.write("\n\n" + "="*80 + "\n\n")
 
 
 # ======================================================================================================================
@@ -923,17 +417,15 @@ class SeqGenerator:
     Class for generating sequences with random insertions from reference libraries.
     """
 
-    def __init__(self, input_file: str, insertion: int, iteration: int, batch: int, processors: int, output_dir: str,
+    def __init__(self, input_file: str, insertion: int, batch: int, processors: int, output_dir: str,
                  ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
-                 ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
-                 flag_visual: bool = False):
+                 ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False):
         """
         Initialize the sequence generator.
 
         Args:
             input_file (str): Path to the input sequence file
             insertion (int): Number of insertions per sequence
-            iteration (int): Number of times to iterate the insertion process
             batch (int): Number of independent result files to generate
             processors (int): Number of processors to use
             output_dir (str): Directory to save output files
@@ -942,18 +434,15 @@ class SeqGenerator:
             ref_len_limit (int, optional): Maximum length limit for reference sequences to load
             flag_filter_n (bool): Whether to filter out sequences containing N
             flag_track (bool): Whether to track reference sequences used
-            flag_visual (bool): Whether to generate tree visualization files
         """
         self.input_file = input_file
         self.insertion = insertion
-        self.iteration = iteration
         self.batch = batch
         self.processors = processors
         self.output_dir = output_dir
         self.ref_len_limit = ref_len_limit
         self.flag_filter_n = flag_filter_n
         self.flag_track = flag_track
-        self.flag_visualize = flag_visual
 
         # Load input sequence
         self.input = list(SeqIO.parse(input_file, "fasta"))
@@ -977,68 +466,51 @@ class SeqGenerator:
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
-    def __process_single_sequence(self, seq_record: SeqRecord) -> Tuple[SeqRecord,
-                                                                        Optional[List[SeqRecord]],
-                                                                        Optional[SequenceNode]]:
+    def __process_single_sequence(self, seq_record: SeqRecord) -> Tuple[SeqRecord, Optional[List[SeqRecord]]]:
         """
-        Process a single sequence through all iterations using a tree-based algorithm.
-        Directly navigates the tree for insertions without rebuilding it.
-        
-        This optimized implementation maintains a balanced tree structure for efficient
-        insertion and traversal operations, especially for large sequences with many 
-        insertion points.
+        Process a single sequence with random insertions.
         
         Args:
             seq_record (SeqRecord): The input sequence record
             
         Returns:
-            Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[SequenceNode]]: 
-                The processed sequence, used references if tracking, and the root node if tracking
+            Tuple[SeqRecord, Optional[List[SeqRecord]]]: 
+                The processed sequence and used references if tracking
         """
         # Start with a single node containing the original sequence
         root = SequenceNode(str(seq_record.seq))
         
-        for i in range(self.iteration):
-            # Get the current total sequence length
-            total_length = root.total_length
-            
-            # Generate all insertion positions and reference sequences at once
-            insert_positions = random.choices(range(total_length + 1), k=self.insertion)
-            selected_refs = random.choices(self.ref_sequences, weights=self.ref_weights, k=self.insertion)
-            
-            # Sort positions in descending order to maintain position integrity during insertion
-            # This ensures earlier insertions don't affect the positions of later insertions
-            insert_positions, selected_refs = sort_multiple_lists(insert_positions, selected_refs, reverse=True)
-            
-            # Insert references directly into the tree in optimal order
-            for pos, ref_seq in zip(insert_positions, selected_refs):
-                metadata = {'iteration': i + 1}
-                root = root.insert(pos, ref_seq, metadata)
+        # Get the current total sequence length
+        total_length = root.total_length
+        
+        # Generate all insertion positions and reference sequences at once
+        insert_positions = random.choices(range(total_length + 1), k=self.insertion)
+        selected_refs = random.choices(self.ref_sequences, weights=self.ref_weights, k=self.insertion)
+        
+        # Sort positions in descending order to maintain position integrity during insertion
+        # This ensures earlier insertions don't affect the positions of later insertions
+        insert_positions, selected_refs = sort_multiple_lists(insert_positions, selected_refs, reverse=True)
+        
+        # Insert references directly into the tree in optimal order
+        for pos, ref_seq in zip(insert_positions, selected_refs):
+            metadata = {}
+            root = root.insert(pos, ref_seq, metadata)
         
         # Generate final sequence
         final_seq = str(root)
-        new_id = f"{seq_record.id}_iter{self.iteration}_ins{self.insertion}"
+        new_id = f"{seq_record.id}_ins{self.insertion}"
         new_seq_record = create_sequence_record(final_seq, new_id)
-        
-        # Generate visualization (if enabled)
-        if self.flag_visualize:
-            visualize_sequence(seq_record.id, root, self.output_dir)
         
         # Only collect reference sequences if tracking is enabled
         used_refs = None
         if self.flag_track:
             used_refs, _ = root.collect_refs(seq_record.id)
-            return new_seq_record, used_refs, root
+            return new_seq_record, used_refs
         
-        # If visualization is enabled, return root node
-        if self.flag_visualize:
-            return new_seq_record, used_refs, root
-        
-        return new_seq_record, used_refs, None
+        return new_seq_record, None
 
     def _process_chunk(self, chunk_idx: int, chunk_size: int, total_sequences: int) -> Tuple[List[SeqRecord], 
-                                                                                         Optional[List[SeqRecord]],
-                                                                                         Optional[Dict[str, List[str]]]]:
+                                                                                          Optional[List[SeqRecord]]]:
         """
         Process a chunk of sequences.
         
@@ -1048,33 +520,27 @@ class SeqGenerator:
             total_sequences (int): Total number of sequences to process
             
         Returns:
-            Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[Dict[str, List[str]]]]: 
-                The processed sequences, used references if tracking, and tree visualizations if tracking
+            Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: 
+                The processed sequences and used references if tracking
         """
         start_idx = chunk_idx * chunk_size
         end_idx = min(start_idx + chunk_size, total_sequences)
         
         processed_seqs = []
         used_refs = [] if self.flag_track else None
-        tree_visuals = {} if self.flag_visualize else None
         
         for i in range(start_idx, end_idx):
             seq_record = self.input[i]
-            processed_seq, refs, root_node = self.__process_single_sequence(seq_record)
+            processed_seq, refs = self.__process_single_sequence(seq_record)
             processed_seqs.append(processed_seq)
             
             if self.flag_track and refs:
                 used_refs.extend(refs)
             
-            if self.flag_visualize and root_node:
-                tree_lines, _, _ = root_node.generate_tree_visual()
-                tree_visuals[seq_record.id] = tree_lines
-        
-        return processed_seqs, used_refs, tree_visuals
+        return processed_seqs, used_refs
 
     def __process_batch_multiprocessing(self, total_sequences: int) -> Tuple[List[SeqRecord], 
-                                                                             Optional[List[SeqRecord]],
-                                                                             Optional[Dict[str, List[str]]]]:
+                                                                              Optional[List[SeqRecord]]]:
         """
         Process a batch of sequences using multiprocessing.
         
@@ -1082,8 +548,8 @@ class SeqGenerator:
             total_sequences (int): Total number of sequences to process
             
         Returns:
-            Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[Dict[str, List[str]]]]: 
-                All processed sequences, references, and tree visualizations
+            Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: 
+                All processed sequences and references
         """
         # Calculate proper chunk size for work division
         chunk_size = max(1, total_sequences // (self.processors * 4))
@@ -1098,24 +564,20 @@ class SeqGenerator:
         # Process chunks in parallel
         all_sequences = []
         all_refs = [] if self.flag_track else None
-        all_tree_visuals = {} if self.flag_visualize else None
         
         with mp.Pool(self.processors) as pool:
             results_iter = pool.starmap(self._process_chunk, chunk_args)
             
-            for i, (seqs, refs, tree_visuals) in enumerate(results_iter, 1):
+            for i, (seqs, refs) in enumerate(results_iter, 1):
                 all_sequences.extend(seqs)
                 if self.flag_track and refs:
                     all_refs.extend(refs)
-                if self.flag_visualize and tree_visuals:
-                    all_tree_visuals.update(tree_visuals)
                 print(f"Completed chunk {i}/{num_chunks}")
         
-        return all_sequences, all_refs, all_tree_visuals
+        return all_sequences, all_refs
 
     def __process_batch_single_thread(self, total_sequences: int) -> Tuple[List[SeqRecord], 
-                                                                          Optional[List[SeqRecord]],
-                                                                          Optional[Dict[str, List[str]]]]:
+                                                                           Optional[List[SeqRecord]]]:
         """
         Process a batch of sequences using a single thread.
         
@@ -1123,27 +585,23 @@ class SeqGenerator:
             total_sequences (int): Total number of sequences to process
             
         Returns:
-            Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[Dict[str, List[str]]]]: 
-                All processed sequences, references, and tree visualizations
+            Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: 
+                All processed sequences and references
         """
         all_sequences = []
         all_refs = [] if self.flag_track else None
-        all_tree_visuals = {} if self.flag_visualize else None
         
         for i, seq_record in enumerate(self.input):
-            processed_seq, refs, root_node = self.__process_single_sequence(seq_record)
+            processed_seq, refs = self.__process_single_sequence(seq_record)
             all_sequences.append(processed_seq)
             
             if self.flag_track and refs:
                 all_refs.extend(refs)
-            if self.flag_visualize and root_node:
-                tree_lines, _, _ = root_node.generate_tree_visual()
-                all_tree_visuals[seq_record.id] = tree_lines
             
             if (i + 1) % 10 == 0 or i + 1 == total_sequences:
                 print(f"Processed {i+1}/{total_sequences} sequences")
         
-        return all_sequences, all_refs, all_tree_visuals
+        return all_sequences, all_refs
 
     def __process_single_batch(self, batch_num: int) -> float:
         """
@@ -1167,15 +625,15 @@ class SeqGenerator:
         
         # Divide work based on number of processors
         if self.processors > 1 and total_sequences > 1:
-            all_sequences, all_refs, all_tree_visuals = self.__process_batch_multiprocessing(total_sequences)
+            all_sequences, all_refs = self.__process_batch_multiprocessing(total_sequences)
         else:
-            all_sequences, all_refs, all_tree_visuals = self.__process_batch_single_thread(total_sequences)
+            all_sequences, all_refs = self.__process_batch_single_thread(total_sequences)
         
         os.makedirs(self.output_dir, exist_ok=True)
         print(f"Output directory: {self.output_dir}")
 
         # Save results for this batch
-        self.__save_batch_results(self.output_dir, all_sequences, all_refs, all_tree_visuals, batch_num)
+        self.__save_batch_results(self.output_dir, all_sequences, all_refs, batch_num)
         
         batch_elapsed_time = time.time() - batch_start_time
         print(f"Batch {batch_num} completed in {batch_elapsed_time:.2g} seconds")
@@ -1183,9 +641,8 @@ class SeqGenerator:
         return batch_elapsed_time
 
     def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], 
-                             references: Optional[List[SeqRecord]], 
-                             tree_visuals: Optional[Dict[str, List[str]]], 
-                             batch_num: int = 1):
+                              references: Optional[List[SeqRecord]], 
+                              batch_num: int = 1):
         """
         Save the batch results to output files.
         
@@ -1193,7 +650,6 @@ class SeqGenerator:
             output_dir (str): Directory to save the results
             sequences (List[SeqRecord]): List of sequence records to save
             references (Optional[List[SeqRecord]]): List of reference records to save if tracking is enabled
-            tree_visuals (Optional[Dict[str, List[str]]]): Dictionary mapping sequence IDs to tree visualization lines
             batch_num (int): The batch number (1-based index)
         """
         # Add batch suffix to filenames if multiple batches
@@ -1205,10 +661,6 @@ class SeqGenerator:
             print(f"Saving {len(references)} reference sequence records")
             output_dict[f"used_refs{suffix}.fasta"] = references
         
-        if self.flag_visualize:
-            print(f"Saving tree structure visualizations")
-            _save_tree_structure_visualization(output_dir, tree_visuals, suffix)
-        
         save_multi_fasta_from_dict(output_dict, output_dir)
 
     def __print_header(self):
@@ -1218,11 +670,9 @@ class SeqGenerator:
         print(f"=== RandSeqInsert {VERSION} ===")
         print(f"Processing input file: {self.input_file}")
         print(f"Number of input sequences: {len(self.input)}")
-        print(f"Insertion settings: {self.insertion} insertions per sequence × {self.iteration} iterations")
+        print(f"Insertion settings: {self.insertion} insertions per sequence")
         print(f"Reference library: {len(self.ref_sequences)} sequences loaded")
         print(f"Generating {self.batch} independent result file(s)")
-        if self.flag_visualize:
-            print(f"Visualization: Enabled (output to {os.path.join(self.output_dir, 'seq_visualization')})")
 
     def __print_summary(self, total_elapsed_time: float):
         """
@@ -1237,9 +687,6 @@ class SeqGenerator:
             print(f"Results saved to {os.path.abspath(self.output_dir)} with filenames sequences_batch[1-{self.batch}].fasta")
         else:
             print(f"Results saved to {os.path.abspath(self.output_dir)}")
-            
-        if self.flag_visualize:
-            print(f"Sequence visualizations saved to {os.path.join(os.path.abspath(self.output_dir), 'seq_visualization')}")
 
     def execute(self):
         """
@@ -1269,8 +716,6 @@ def main():
                                      epilog="")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}\n{INFO}")
 
-    # TODO Revise the help information
-
     # Core Arguments
     core_group = parser.add_argument_group("Core Arguments")
     core_group.add_argument("-i", "--input",
@@ -1280,10 +725,8 @@ def main():
                        help=f"Output directory path. Generated sequences and related files will be saved here. Default: '{DEFAULT_OUTPUT_DIR_ABS_PATH}'")
 
     core_group.add_argument("-is", "--insertion", metavar="INT",
-                       help="Number of insertions per sequence. Specifies how many reference sequence fragments to insert into each input sequence per iteration.",
+                       help="Number of insertions per sequence. Specifies how many reference sequence fragments to insert into each input sequence.",
                        type=int, required=True)
-    core_group.add_argument("-it", "--iteration", metavar="INT", type=int, default=1,
-                       help="Number of times to iterate the insertion process. Each iteration builds upon the results of the previous one.")
 
     # Reference Library Arguments
     ref_group = parser.add_argument_group("Reference Library Arguments")
@@ -1307,14 +750,11 @@ def main():
                                 help="Filter out sequences containing N. Enable this option to exclude reference sequences containing N bases.")
     flag_group.add_argument("--track", action="store_true",
                        help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
-    flag_group.add_argument("--visual", action="store_true",
-                       help="Generate sequence insertion visualization files (both tree and sequence visualizations), displaying the nested relationship between original sequences and reference sequences in text format.")
 
     parsed_args = parser.parse_args()
 
     input_file = parsed_args.input
     insertion = parsed_args.insertion
-    iteration = parsed_args.iteration
     batch = parsed_args.batch
     processors = parsed_args.processors
     output_dir_path = parsed_args.output
@@ -1323,12 +763,10 @@ def main():
     ref_len_limit = parsed_args.limit
     flag_filter_n = parsed_args.filter_n
     flag_track = parsed_args.track
-    flag_visual = parsed_args.visual
 
     generator = SeqGenerator(
         input_file=input_file,
         insertion=insertion,
-        iteration=iteration,
         batch=batch,
         processors=processors,
         output_dir=output_dir_path,
@@ -1336,8 +774,7 @@ def main():
         ref_lib_weight=ref_lib_weight,
         ref_len_limit=ref_len_limit,
         flag_filter_n=flag_filter_n,
-        flag_track=flag_track,
-        flag_visual=flag_visual
+        flag_track=flag_track
     )
     generator.execute()
 
