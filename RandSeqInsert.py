@@ -1227,17 +1227,13 @@ class SeqGenerator:
     def __print_summary(self, total_elapsed_time: float):
         """
         Print a summary of the processing results.
-        
+
         Args:
             total_elapsed_time (float): Total time taken for all batches
         """
         print(f"\nAll batches completed in {total_elapsed_time:.2g} seconds")
-        
-        if self.batch > 1:
-            print(f"Results saved to {os.path.abspath(self.output_dir)} with filenames sequences_batch[1-{self.batch}].fasta")
-        else:
-            print(f"Results saved to {os.path.abspath(self.output_dir)}")
-            
+        print(f"Results saved to {os.path.abspath(self.output_dir)}")
+
         if self.flag_visualize:
             print(f"Sequence visualizations saved to {os.path.join(os.path.abspath(self.output_dir), 'seq_visualization')}")
 
