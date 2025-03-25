@@ -2,3 +2,6 @@
 __pycache__
 .idea
 RandSeqInsert-Result
+_test
+test*.fa
+Col-CEN_v1.2.fasta

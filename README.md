@@ -36,44 +36,44 @@ python RandSeqInsert.py [-h] [-v] -i INPUT -ins INSERTION [-it ITERATION] [-b BA
 ### Program Information
 
 - `-h, --help`
-  - Show help message and exit
+    - Show help message and exit
 - `-v, --version`
-  - Show version information and exit
+    - Show version information and exit
 
 ### Arguments
 
 - `-i, --input`
-  - Path to input sequence file
+    - Path to input sequence file
 - `-is, --insertion`
-  - Number of insertions to perform in each sequence
+    - Number of insertions to perform in each sequence
 
 - `-it, --iteration` (default: 1)
-  - Number of iterations to process each sequence
+    - Number of iterations to process each sequence
 
 - `-b, --batch` (default: 1)
-  - Number of batches to process
+    - Number of batches to process
 
 - `-p, --processor` (default: available cores - 2)
-  - Number of processor cores to use
+    - Number of processor cores to use
 
 - `-o, --output` (default: "RandSeqInsert-Result")
-  - Output directory path
+    - Output directory path
 
 - `-r, --reference`
-  - Path to reference library directory
-  - Can be specified multiple times for different libraries
-  - Built-in reference libraries options:
-    - `TIR`: Use built-in TIR reference library
+    - Path to reference library directory
+    - Can be specified multiple times for different libraries
+    - Built-in reference libraries options:
+        - `TIR`: Use built-in TIR reference library
 
 - `-w, --weight` (default: equal weights)
-  - Weight for each reference library
-  - Must match number of reference libraries
+    - Weight for each reference library
+    - Must match number of reference libraries
 
 - `--track`
-  - Enable tracking of inserted references
+    - Enable tracking of inserted references
 
 - `--filter_n`
-  - Avoid using reference sequences with N
+    - Avoid using reference sequences with N
 
 ## Examples
 
