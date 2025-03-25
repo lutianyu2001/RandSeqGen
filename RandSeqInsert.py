@@ -158,6 +158,100 @@ class SequenceNode:
         """
         return "".join(self.collect_content_in_order_traversal())
 
+    def to_graphviz(self, node_id_prefix: str = "node", abs_pos: int = 0) -> str:
+        """
+        Generate Graphviz DOT format string for visualizing the tree structure.
+        
+        Args:
+            node_id_prefix (str): Prefix for node IDs in the graph
+            abs_pos (int): Current absolute position in the concatenated sequence
+            
+        Returns:
+            str: Graphviz DOT format string
+        """
+        # Initialize the DOT string with graph declaration
+        dot_str = []
+        dot_str.append('digraph SequenceTree {')
+        dot_str.append('  node [shape=box, style=filled];')
+        
+        # Generate nodes and edges through recursive traversal
+        nodes, edges = self._build_graphviz_nodes_edges(node_id_prefix, abs_pos)
+        
+        # Add all nodes and edges to the DOT string
+        for node in nodes:
+            dot_str.append(f'  {node}')
+        for edge in edges:
+            dot_str.append(f'  {edge}')
+        
+        dot_str.append('}')
+        return '\n'.join(dot_str)
+    
+    def _build_graphviz_nodes_edges(self, node_id_prefix: str, abs_pos: int) -> tuple:
+        """
+        Recursively build nodes and edges for Graphviz visualization.
+        
+        Args:
+            node_id_prefix (str): Prefix for node IDs
+            abs_pos (int): Current absolute position in the concatenated sequence
+            
+        Returns:
+            tuple: (nodes list, edges list)
+        """
+        nodes = []
+        edges = []
+        
+        # Calculate positions
+        left_length = self.left.total_length if self.left else 0
+        
+        # Calculate start and end positions
+        start_pos = abs_pos + left_length
+        end_pos = start_pos + self.length
+        
+        # Generate unique ID for this node
+        node_id = f"{node_id_prefix}_{start_pos}_{end_pos}"
+        
+        # Determine node type and color
+        node_type = "REF" if self.is_reference else "SRC"
+        fill_color = "lightblue" if self.is_reference else "lightgreen"
+        
+        # Create node label with position information
+        label = f"{node_type}\\nStart: {start_pos}\\nEnd: {end_pos}\\nLength: {self.length}"
+        
+        # Add the node to the nodes list
+        nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
+        
+        # Process left child if exists
+        if self.left:
+            left_nodes, left_edges = self.left._build_graphviz_nodes_edges(f"{node_id_prefix}_L", abs_pos)
+            nodes.extend(left_nodes)
+            edges.extend(left_edges)
+            
+            # Find the ID of the left child's root node
+            left_abs_pos = abs_pos
+            left_start = left_abs_pos + (self.left.left.total_length if self.left.left else 0)
+            left_end = left_start + self.left.length
+            left_id = f"{node_id_prefix}_L_{left_start}_{left_end}"
+            
+            # Add edge from this node to left child
+            edges.append(f'{node_id} -> {left_id} [label="L"];')
+        
+        # Process right child if exists
+        if self.right:
+            right_abs_pos = abs_pos + left_length + self.length
+            right_nodes, right_edges = self.right._build_graphviz_nodes_edges(f"{node_id_prefix}_R", right_abs_pos)
+            nodes.extend(right_nodes)
+            edges.extend(right_edges)
+            
+            # Find the ID of the right child's root node
+            right_start = right_abs_pos + (self.right.left.total_length if self.right.left else 0)
+            right_end = right_start + self.right.length
+            right_id = f"{node_id_prefix}_R_{right_start}_{right_end}"
+            
+            # Add edge from this node to right child
+            edges.append(f'{node_id} -> {right_id} [label="R"];')
+        
+        return nodes, edges
+
     def __update_total_length(self):
         """
         Update the total length of this subtree.
@@ -645,7 +739,7 @@ class SeqGenerator:
     def __init__(self, input_file: str, insertion: int, batch: int, processors: int, output_dir: str,
                  ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
                  ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
-                 tsd_length: Optional[int] = None):
+                 tsd_length: Optional[int] = None, flag_visual: bool = False):
         """
         Initialize the sequence generator.
 
@@ -661,6 +755,7 @@ class SeqGenerator:
             flag_filter_n (bool): Whether to filter out sequences containing N
             flag_track (bool): Whether to track reference sequences used
             tsd_length (int, optional): Length of Target Site Duplication (TSD) to generate
+            flag_visual (bool): Whether to generate graphviz visualization of the sequence tree
         """
         self.input_file = input_file
         self.insertion = insertion
@@ -671,6 +766,7 @@ class SeqGenerator:
         self.flag_filter_n = flag_filter_n
         self.flag_track = flag_track
         self.tsd_length = tsd_length
+        self.flag_visual = flag_visual
 
         # Load input sequence
         self.input = list(SeqIO.parse(input_file, "fasta"))
@@ -730,6 +826,14 @@ class SeqGenerator:
         if self.tsd_length:
             new_id += f"_tsd{self.tsd_length}"
         new_seq_record = create_sequence_record(final_seq, new_id)
+        
+        # Generate graphviz visualization if requested
+        if self.flag_visual:
+            graphviz_str = root.to_graphviz(node_id_prefix=seq_record.id)
+            visual_file_path = os.path.join(self.output_dir, f"{seq_record.id}_tree_visual.dot")
+            with open(visual_file_path, "w") as f:
+                f.write(graphviz_str)
+            print(f"Generated tree visualization for {seq_record.id} at {visual_file_path}")
         
         # Only collect reference sequences if tracking is enabled
         used_refs = None
@@ -904,6 +1008,8 @@ class SeqGenerator:
             print(f"TSD settings: Generating TSD of length {self.tsd_length} at insertion sites")
         print(f"Reference library: {len(self.ref_sequences)} sequences loaded")
         print(f"Generating {self.batch} independent result file(s)")
+        if self.flag_visual:
+            print(f"Tree visualization enabled: DOT files will be generated for each sequence")
 
     def __print_summary(self, total_elapsed_time: float):
         """
@@ -983,6 +1089,8 @@ def main():
                        help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
     flag_group.add_argument("--tsd", type=int, metavar="LENGTH",
                        help="Enable Target Site Duplication (TSD) with specified length. When a reference sequence is inserted, TSD of this length will be generated at the insertion site.")
+    flag_group.add_argument("--visual", action="store_true",
+                       help="Generate Graphviz DOT files visualizing the tree structure of each sequence. Files will be named {seqid}_tree_visual.dot and saved in the output directory.")
 
     parsed_args = parser.parse_args()
 
@@ -997,6 +1105,7 @@ def main():
     flag_filter_n = parsed_args.filter_n
     flag_track = parsed_args.track
     tsd_length = parsed_args.tsd
+    flag_visual = parsed_args.visual
 
     generator = SeqGenerator(
         input_file=input_file,
@@ -1009,7 +1118,8 @@ def main():
         ref_len_limit=ref_len_limit,
         flag_filter_n=flag_filter_n,
         flag_track=flag_track,
-        tsd_length=tsd_length
+        tsd_length=tsd_length,
+        flag_visual=flag_visual
     )
     generator.execute()
 
