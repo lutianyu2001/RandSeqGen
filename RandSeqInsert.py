@@ -966,6 +966,7 @@ class SeqGenerator:
         if self.flag_visual:
             graphviz_str = root.to_graphviz(node_id_prefix=seq_record.id)
             visual_dir_path = os.path.join(self.output_dir, TREE_VISUAL_DIR_NAME)
+            os.makedirs(visual_dir_path, exist_ok=True)
             visual_file_path = os.path.join(visual_dir_path, f"{seq_record.id}_tree_visual.dot")
             with open(visual_file_path, "w") as f:
                 f.write(graphviz_str)
