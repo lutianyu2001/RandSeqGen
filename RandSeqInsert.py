@@ -502,6 +502,7 @@ class SequenceNode:
         
         return current if not parent_stack else self.__balance()
 
+    # Potential bug?: May trigger "RecursionError: maximum recursion depth exceeded" in some cases
     def insert_recursive(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
         """
         Insert a reference sequence at the absolute position in the tree.
@@ -874,7 +875,7 @@ class SeqGenerator:
     def __init__(self, input_file: str, insertion: int, batch: int, processors: int, output_dir: str,
                  ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
                  ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
-                 tsd_length: Optional[int] = None, flag_visual: bool = False):
+                 tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False):
         """
         Initialize the sequence generator.
 
@@ -891,6 +892,7 @@ class SeqGenerator:
             flag_track (bool): Whether to track reference sequences used
             tsd_length (int, optional): Length of Target Site Duplication (TSD) to generate
             flag_visual (bool): Whether to generate graphviz visualization of the sequence tree
+            flag_recursive (bool): Whether to use recursive insertion method
         """
         self.input_file = input_file
         self.insertion = insertion
@@ -902,6 +904,7 @@ class SeqGenerator:
         self.flag_track = flag_track
         self.tsd_length = tsd_length
         self.flag_visual = flag_visual
+        self.flag_recursive = flag_recursive
 
         # Load input sequence
         self.input = list(SeqIO.parse(input_file, "fasta"))
@@ -953,7 +956,10 @@ class SeqGenerator:
         # Insert references directly into the tree in optimal order
         for pos, ref_seq in zip(insert_positions, selected_refs):
             metadata = {"tsd_length": self.tsd_length} if self.tsd_length else {}
-            root = root.insert(pos, ref_seq, metadata)
+            if self.flag_recursive:
+                root = root.insert_recursive(pos, ref_seq, metadata)
+            else:
+                root = root.insert(pos, ref_seq, metadata)
         
         # Generate final sequence
         final_seq = str(root)
@@ -1145,6 +1151,8 @@ class SeqGenerator:
             print(f"TSD settings: Generating TSD of length {self.tsd_length} at insertion sites")
         print(f"Reference library: {len(self.ref_sequences)} sequences loaded")
         print(f"Generating {self.batch} independent result file(s)")
+        if self.flag_recursive:
+            print(f"Using recursive insertion method")
         if self.flag_visual:
             print(f"Tree visualization enabled: DOT files will be generated for each sequence")
 
@@ -1228,6 +1236,8 @@ def main():
                        help="Enable Target Site Duplication (TSD) with specified length. When a reference sequence is inserted, TSD of this length will be generated at the insertion site.")
     flag_group.add_argument("--visual", action="store_true",
                        help="Generate Graphviz DOT files visualizing the tree structure of each sequence. Files will be named {seqid}_tree_visual.dot and saved in the output directory.")
+    flag_group.add_argument("--recursive", action="store_true",
+                       help="Use recursive insertion method instead of iterative one.")
 
     parsed_args = parser.parse_args()
 
@@ -1243,6 +1253,7 @@ def main():
     flag_track = parsed_args.track
     tsd_length = parsed_args.tsd
     flag_visual = parsed_args.visual
+    flag_recursive = parsed_args.recursive
 
     generator = SeqGenerator(
         input_file=input_file,
@@ -1256,7 +1267,8 @@ def main():
         flag_filter_n=flag_filter_n,
         flag_track=flag_track,
         tsd_length=tsd_length,
-        flag_visual=flag_visual
+        flag_visual=flag_visual,
+        flag_recursive=flag_recursive
     )
     generator.execute()
 
