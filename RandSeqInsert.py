@@ -375,6 +375,126 @@ class SequenceNode:
 
     def insert(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
         """
+        Insert a reference sequence at the absolute position in the tree (iterative implementation).
+
+        Args:
+            abs_position (int): Absolute position in the tree to insert at
+            ref_seq (str): Reference sequence to insert
+            ref_metadata: Metadata for the reference
+
+        Returns:
+            SequenceNode: Root node after insertion
+        """
+        current = self
+        parent_stack = []
+        path_directions = []  # Record the path direction from root to current node ('left' or 'right')
+        
+        # Iteratively find insertion position
+        while True:
+            left_length = current.left.total_length if current.left else 0
+            node_start = left_length
+            node_end = node_start + current.length
+            
+            # Case 1: Position is in the current node's left subtree
+            if abs_position <= left_length:
+                if current.left:
+                    # Record parent node and direction for backtracking
+                    parent_stack.append(current)
+                    path_directions.append('left')
+                    current = current.left
+                else:
+                    # Create new left child node
+                    current.left = SequenceNode(ref_seq, True, ref_metadata)
+                    break
+            
+            # Case 2: Position is inside the current node
+            elif node_start < abs_position < node_end:
+                # Calculate relative position
+                rel_pos = abs_position - node_start
+                left_content = current.content[:rel_pos]
+                right_content = current.content[rel_pos:]
+                
+                # Handle TSD generation
+                tsd_length = ref_metadata.get("tsd_length", 0) if ref_metadata else 0
+                if tsd_length > 0:
+                    # Extract source TSD sequence from the original sequence
+                    source_tsd_seq = right_content[:min(tsd_length, len(right_content))]
+                    
+                    # Generate TSD sequences (potentially with mutations)
+                    tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
+                    
+                    # Remove source TSD from right_content as it will be duplicated
+                    if len(source_tsd_seq) > 0:
+                        right_content = right_content[len(source_tsd_seq):]
+                    
+                    # Add TSD sequences to the left and right content
+                    left_content = left_content + tsd_5
+                    right_content = tsd_3 + right_content
+                
+                # Create new left child with left content
+                new_left = SequenceNode(left_content, current.is_reference, current.metadata)
+                if current.left:
+                    new_left.left = current.left
+                    new_left.__update_total_length()
+                    new_left.__update_height()
+
+                # Create new right child with right content and original right child
+                new_right = SequenceNode(right_content, current.is_reference, current.metadata)
+                if current.right:
+                    new_right.right = current.right
+                    new_right.__update_total_length()
+                    new_right.__update_height()
+
+                # Replace current node's content
+                current.content = ref_seq
+                current.length = len(ref_seq)
+                current.is_reference = True
+                current.metadata = ref_metadata
+
+                # Set new children
+                current.left = new_left
+                current.right = new_right
+                break
+            
+            # Case 3: Position is in the current node's right subtree
+            elif abs_position >= node_end:
+                if current.right:
+                    # Record parent node and direction for backtracking
+                    parent_stack.append(current)
+                    path_directions.append('right')
+                    # Adjust absolute position to fit the right subtree's relative position
+                    abs_position -= node_end
+                    current = current.right
+                else:
+                    # Create new right child node
+                    current.right = SequenceNode(ref_seq, True, ref_metadata)
+                    break
+            else:
+                raise RuntimeError("[ERROR] Should not reach here")
+        
+        # Backtrack and update node heights and total lengths while executing balance
+        while parent_stack:
+            child = current
+            parent = parent_stack.pop()
+            direction = path_directions.pop()
+            
+            # Update parent node's child reference
+            if direction == 'left':
+                parent.left = child
+            else:  # 'right'
+                parent.right = child
+            
+            # Update heights and total lengths
+            parent.__update_height()
+            parent.__update_total_length()
+            
+            # Execute balance
+            current = parent.__balance()
+        
+        return current if not parent_stack else self
+
+    def insert_recursive(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
+        """
         Insert a reference sequence at the absolute position in the tree.
 
         Args:
@@ -391,7 +511,7 @@ class SequenceNode:
         # Fast path: Position is before this node
         if abs_position <= left_length:
             if self.left:
-                self.left = self.left.insert(abs_position, ref_seq, ref_metadata)
+                self.left = self.left.insert_recursive(abs_position, ref_seq, ref_metadata)
             else:
                 # Insert as left child
                 self.left = SequenceNode(ref_seq, True, ref_metadata)
@@ -459,7 +579,7 @@ class SequenceNode:
         # Fast path: Position is after this node
         if abs_position >= node_end:
             if self.right:
-                self.right = self.right.insert(abs_position - node_end, ref_seq, ref_metadata)
+                self.right = self.right.insert_recursive(abs_position - node_end, ref_seq, ref_metadata)
             else:
                 # Insert as right child
                 self.right = SequenceNode(ref_seq, True, ref_metadata)
