@@ -127,6 +127,7 @@ def generate_TSD(seq_slice: str,
 class SequenceNode:
     """
     Node in a sequence tree structure, used for efficient sequence insertion operations.
+    Implemented as an AVL tree to maintain balance during insertions.
     """
     def __init__(self, content: str, is_reference: bool = False, metadata: dict = None):
         """
@@ -145,6 +146,8 @@ class SequenceNode:
         self.right = None
         # Total length of the subtree for efficient traversal
         self.total_length = self.length
+        # Height of the node for AVL balancing
+        self.height = 1
 
     def __str__(self) -> str:
         """
@@ -165,6 +168,114 @@ class SequenceNode:
         left_length = self.left.total_length if self.left else 0
         right_length = self.right.total_length if self.right else 0
         self.total_length = left_length + self.length + right_length
+
+    def __update_height(self):
+        """
+        Update the height of this node.
+        """
+        left_height = self.left.height if self.left else 0
+        right_height = self.right.height if self.right else 0
+        self.height = max(left_height, right_height) + 1
+
+    def __get_balance(self):
+        """
+        Calculate the balance factor of this node.
+
+        Returns:
+            int: Balance factor (left height - right height)
+        """
+        left_height = self.left.height if self.left else 0
+        right_height = self.right.height if self.right else 0
+        return left_height - right_height
+
+    def __rotate_right(self):
+        """
+        Perform a right rotation on this node.
+
+        Returns:
+            SequenceNode: The new root after rotation
+        """
+        # Store the left child as the new root
+        new_root = self.left
+        
+        # The left child's right subtree becomes this node's left subtree
+        self.left = new_root.right
+        
+        # This node becomes the new root's right child
+        new_root.right = self
+        
+        # Update heights and total lengths
+        self.__update_height()
+        self.__update_total_length()
+        new_root.__update_height()
+        new_root.__update_total_length()
+        
+        return new_root
+
+    def __rotate_left(self):
+        """
+        Perform a left rotation on this node.
+
+        Returns:
+            SequenceNode: The new root after rotation
+        """
+        # Store the right child as the new root
+        new_root = self.right
+        
+        # The right child's left subtree becomes this node's right subtree
+        self.right = new_root.left
+        
+        # This node becomes the new root's left child
+        new_root.left = self
+        
+        # Update heights and total lengths
+        self.__update_height()
+        self.__update_total_length()
+        new_root.__update_height()
+        new_root.__update_total_length()
+        
+        return new_root
+
+    def __balance(self):
+        """
+        Balance this node if needed.
+
+        Returns:
+            SequenceNode: The new root after balancing
+        """
+        # Update height
+        self.__update_height()
+        
+        # Get balance factor
+        balance = self.__get_balance()
+        
+        # Left-Left case
+        if balance > 1 and (self.left and self.__get_left_balance() >= 0):
+            return self.__rotate_right()
+        
+        # Left-Right case
+        if balance > 1 and (self.left and self.__get_left_balance() < 0):
+            self.left = self.left.__rotate_left()
+            return self.__rotate_right()
+        
+        # Right-Right case
+        if balance < -1 and (self.right and self.__get_right_balance() <= 0):
+            return self.__rotate_left()
+        
+        # Right-Left case
+        if balance < -1 and (self.right and self.__get_right_balance() > 0):
+            self.right = self.right.__rotate_right()
+            return self.__rotate_left()
+        
+        return self
+
+    def __get_left_balance(self):
+        """Get balance factor of left child"""
+        return self.left.__get_balance() if self.left else 0
+    
+    def __get_right_balance(self):
+        """Get balance factor of right child"""
+        return self.right.__get_balance() if self.right else 0
 
     def insert(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
         """
@@ -189,7 +300,8 @@ class SequenceNode:
                 # Insert as left child
                 self.left = SequenceNode(ref_seq, True, ref_metadata)
             self.__update_total_length()
-            return self
+            self.__update_height()
+            return self.__balance()
 
         # Position is within this node
         node_start = left_length
@@ -225,12 +337,14 @@ class SequenceNode:
             if self.left:
                 new_left.left = self.left
                 new_left.__update_total_length()
+                new_left.__update_height()
 
             # Create new right child with right content and original right child
             new_right = SequenceNode(right_content, self.is_reference, self.metadata)
             if self.right:
                 new_right.right = self.right
                 new_right.__update_total_length()
+                new_right.__update_height()
 
             # Replace this node's content with the reference
             self.content = ref_seq
@@ -242,8 +356,9 @@ class SequenceNode:
             self.left = new_left
             self.right = new_right
             self.__update_total_length()
+            self.__update_height()
 
-            return self
+            return self.__balance()
 
         # Fast path: Position is after this node
         if abs_position >= node_end:
@@ -253,7 +368,8 @@ class SequenceNode:
                 # Insert as right child
                 self.right = SequenceNode(ref_seq, True, ref_metadata)
             self.__update_total_length()
-            return self
+            self.__update_height()
+            return self.__balance()
 
         raise RuntimeError("[ERROR] Should not reach here")
 
