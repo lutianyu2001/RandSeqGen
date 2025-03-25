@@ -3,7 +3,7 @@ __pycache__
 .idea
 RandSeqGen-Result
 RandSeqInsert-Result
-_test
+_test*
 test*.fa
 test.md
 Col-CEN_v1.2.fasta
