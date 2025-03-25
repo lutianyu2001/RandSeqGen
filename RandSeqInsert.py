@@ -405,6 +405,8 @@ class SequenceNode:
                 else:
                     # Create new left child node
                     current.left = SequenceNode(ref_seq, True, ref_metadata)
+                    current.__update_total_length()
+                    current.__update_height()
                     break
             
             # Case 2: Position is inside the current node
@@ -454,6 +456,8 @@ class SequenceNode:
                 # Set new children
                 current.left = new_left
                 current.right = new_right
+                current.__update_total_length()
+                current.__update_height()
                 break
             
             # Case 3: Position is in the current node's right subtree
@@ -468,30 +472,35 @@ class SequenceNode:
                 else:
                     # Create new right child node
                     current.right = SequenceNode(ref_seq, True, ref_metadata)
+                    current.__update_total_length()
+                    current.__update_height()
                     break
             else:
                 raise RuntimeError("[ERROR] Should not reach here")
         
         # Backtrack and update node heights and total lengths while executing balance
         while parent_stack:
-            child = current
             parent = parent_stack.pop()
             direction = path_directions.pop()
             
             # Update parent node's child reference
             if direction == 'left':
-                parent.left = child
+                # Ensure current node is balanced
+                current = current.__balance()
+                parent.left = current
             else:  # 'right'
-                parent.right = child
+                # Ensure current node is balanced
+                current = current.__balance()
+                parent.right = current
             
             # Update heights and total lengths
             parent.__update_height()
             parent.__update_total_length()
             
-            # Execute balance
+            # Execute balance and update current
             current = parent.__balance()
         
-        return current if not parent_stack else self
+        return current if not parent_stack else self.__balance()
 
     def insert_recursive(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
         """
@@ -554,6 +563,8 @@ class SequenceNode:
                 new_left.left = self.left
                 new_left.__update_total_length()
                 new_left.__update_height()
+                # Ensure left subtree is balanced
+                new_left = new_left.__balance()
 
             # Create new right child with right content and original right child
             new_right = SequenceNode(right_content, self.is_reference, self.metadata)
@@ -561,6 +572,8 @@ class SequenceNode:
                 new_right.right = self.right
                 new_right.__update_total_length()
                 new_right.__update_height()
+                # Ensure right subtree is balanced
+                new_right = new_right.__balance()
 
             # Replace this node's content with the reference
             self.content = ref_seq
