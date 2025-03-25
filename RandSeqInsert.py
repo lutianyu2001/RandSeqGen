@@ -659,6 +659,52 @@ class SequenceNode:
 # ======================================================================================================================
 
 
+def process_humanized_int(number: Union[str, int]) -> int:
+    """
+    Process a number string to return the integer.
+
+    This function converts various number formats (plain number, k, m) into
+    the actual integer.
+
+    Args:
+        number (Union[str, int]): Should be a string specifying number:
+            - A plain number (e.g., "100")
+            - Kilo with 'k' suffix (e.g., "1k")
+            - Mega with 'm' suffix (e.g., "1m")
+            If the number is an integer, it will be returned as is.
+
+    Returns:
+        int: The integer represented by the number string.
+
+    Raises:
+        ValueError: If the number string format is invalid.
+
+    Examples:
+        >>> process_humanized_int("100")
+        100
+        >>> process_humanized_int("1k")
+        1000
+        >>> process_humanized_int("1m")
+        1000000
+    """
+    if isinstance(number, int):
+        return number
+
+    number = number.lower()
+
+    # Check for k/m suffix
+    if number.endswith('k'):
+        return int(float(number[:-1]) * 1000)
+    elif number.endswith('m'):
+        return int(float(number[:-1]) * 1000000)
+
+    # Check if pure number
+    if number.isdigit():
+        return int(number)
+
+    raise ValueError("[ERROR] Invalid format. Use plain number, k or m (e.g. 100, 1k, 1m)")
+
+
 def sort_multiple_lists(base: list, *lists: list,
                         key: Optional[Callable] = None, reverse: bool = False) -> Union[list, tuple]:
     """
@@ -872,7 +918,7 @@ class SeqGenerator:
     Class for generating sequences with random insertions from reference libraries.
     """
 
-    def __init__(self, input_file: str, insertion: int, batch: int, processors: int, output_dir: str,
+    def __init__(self, input_file: str, insertion: Union[str, int], batch: int, processors: int, output_dir_path: str,
                  ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
                  ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
                  tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False):
@@ -881,7 +927,7 @@ class SeqGenerator:
 
         Args:
             input_file (str): Path to the input sequence file
-            insertion (int): Number of insertions per sequence
+            insertion (Union[str, int]): Number of insertions per sequence
             batch (int): Number of independent result files to generate
             processors (int): Number of processors to use
             output_dir (str): Directory to save output files
@@ -895,10 +941,10 @@ class SeqGenerator:
             flag_recursive (bool): Whether to use recursive insertion method
         """
         self.input_file = input_file
-        self.insertion = insertion
+        self.insertion = process_humanized_int(insertion)
         self.batch = batch
         self.processors = processors
-        self.output_dir = output_dir
+        self.output_dir = output_dir_path
         self.ref_len_limit = ref_len_limit
         self.flag_filter_n = flag_filter_n
         self.flag_track = flag_track
@@ -1206,9 +1252,9 @@ def main():
     core_group.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_ABS_PATH, metavar="DIR",
                        help=f"Output directory path. Generated sequences and related files will be saved here. Default: '{DEFAULT_OUTPUT_DIR_ABS_PATH}'")
 
-    core_group.add_argument("-is", "--insertion", metavar="INT",
-                       help="Number of insertions per sequence. Specifies how many reference sequence fragments to insert into each input sequence.",
-                       type=int, required=True)
+    core_group.add_argument("-is", "--insert", metavar="INT/STR",
+                       help="Number of insertions per sequence. Accepts either a plain number (e.g., 100) or a string with k/m suffix (e.g., 1k, 1m).",
+                       type=str, required=True)
 
     # Reference Library Arguments
     ref_group = parser.add_argument_group("Reference Library Arguments")
@@ -1241,34 +1287,20 @@ def main():
 
     parsed_args = parser.parse_args()
 
-    input_file = parsed_args.input
-    insertion = parsed_args.insertion
-    batch = parsed_args.batch
-    processors = parsed_args.processors
-    output_dir_path = parsed_args.output
-    ref_lib = parsed_args.reference
-    ref_lib_weight = parsed_args.weight
-    ref_len_limit = parsed_args.limit
-    flag_filter_n = parsed_args.filter_n
-    flag_track = parsed_args.track
-    tsd_length = parsed_args.tsd
-    flag_visual = parsed_args.visual
-    flag_recursive = parsed_args.recursive
-
     generator = SeqGenerator(
-        input_file=input_file,
-        insertion=insertion,
-        batch=batch,
-        processors=processors,
-        output_dir=output_dir_path,
-        ref_lib=ref_lib,
-        ref_lib_weight=ref_lib_weight,
-        ref_len_limit=ref_len_limit,
-        flag_filter_n=flag_filter_n,
-        flag_track=flag_track,
-        tsd_length=tsd_length,
-        flag_visual=flag_visual,
-        flag_recursive=flag_recursive
+        input_file=parsed_args.input,
+        insertion=parsed_args.insert,
+        batch=parsed_args.batch,
+        processors=parsed_args.processors,
+        output_dir_path=parsed_args.output,
+        ref_lib=parsed_args.reference,
+        ref_lib_weight=parsed_args.weight,
+        ref_len_limit=parsed_args.limit,
+        flag_filter_n=parsed_args.filter_n,
+        flag_track=parsed_args.track,
+        tsd_length=parsed_args.tsd,
+        flag_visual=parsed_args.visual,
+        flag_recursive=parsed_args.recursive
     )
     generator.execute()
 
