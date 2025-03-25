@@ -20,16 +20,19 @@ from Bio.SeqRecord import SeqRecord
 import time
 
 VERSION = "v1.0.0"
-INFO = ("by Tianyu (Sky) Lu (tianyu@lu.fm)")
+INFO = ("by Tianyu (Sky) Lu (tianyu@lu.fm)\n"
+        "For TEGE Research")
+
+PROGRAM_ROOT_DIR_ABS_PATH = os.path.dirname(__file__)
 
 # PRE-DEFINED PARAMETERS
 DEFAULT_TSD_SNP_MUTATION_RATE = 0.05
 DEFAULT_TSD_INDEL_MUTATION_RATE = 0.05
 
+TREE_VISUAL_DIR_NAME = "tree_visual"
 DEFAULT_ALLOCATED_CPU_CORES = os.cpu_count() - 2 if os.cpu_count() > 2 else 1
-DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqInsert-Result"
 
-PROGRAM_ROOT_DIR_ABS_PATH = os.path.dirname(__file__)
+DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqInsert-Result"
 DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_PATH)
 
 
@@ -170,12 +173,11 @@ class SequenceNode:
             str: Graphviz DOT format string
         """
         # Initialize the DOT string with graph declaration
-        dot_str = []
-        dot_str.append('digraph SequenceTree {')
-        dot_str.append('  node [shape=box, style=filled];')
-        
+        dot_str = ['digraph SequenceTree {',
+                   '  node [shape=box, style=filled];']
+
         # Generate nodes and edges through recursive traversal
-        nodes, edges = self._build_graphviz_nodes_edges(node_id_prefix, abs_pos)
+        nodes, edges = self.__build_graphviz_nodes_edges(node_id_prefix, abs_pos)
         
         # Add all nodes and edges to the DOT string
         for node in nodes:
@@ -186,7 +188,7 @@ class SequenceNode:
         dot_str.append('}')
         return '\n'.join(dot_str)
     
-    def _build_graphviz_nodes_edges(self, node_id_prefix: str, abs_pos: int) -> tuple:
+    def __build_graphviz_nodes_edges(self, node_id_prefix: str, abs_pos: int) -> tuple:
         """
         Recursively build nodes and edges for Graphviz visualization.
         
@@ -222,7 +224,7 @@ class SequenceNode:
         
         # Process left child if exists
         if self.left:
-            left_nodes, left_edges = self.left._build_graphviz_nodes_edges(f"{node_id_prefix}_L", abs_pos)
+            left_nodes, left_edges = self.left.__build_graphviz_nodes_edges(f"{node_id_prefix}_L", abs_pos)
             nodes.extend(left_nodes)
             edges.extend(left_edges)
             
@@ -238,7 +240,7 @@ class SequenceNode:
         # Process right child if exists
         if self.right:
             right_abs_pos = abs_pos + left_length + self.length
-            right_nodes, right_edges = self.right._build_graphviz_nodes_edges(f"{node_id_prefix}_R", right_abs_pos)
+            right_nodes, right_edges = self.right.__build_graphviz_nodes_edges(f"{node_id_prefix}_R", right_abs_pos)
             nodes.extend(right_nodes)
             edges.extend(right_edges)
             
@@ -830,10 +832,11 @@ class SeqGenerator:
         # Generate graphviz visualization if requested
         if self.flag_visual:
             graphviz_str = root.to_graphviz(node_id_prefix=seq_record.id)
-            visual_file_path = os.path.join(self.output_dir, f"{seq_record.id}_tree_visual.dot")
+            visual_dir_path = os.path.join(self.output_dir, TREE_VISUAL_DIR_NAME)
+            visual_file_path = os.path.join(visual_dir_path, f"{seq_record.id}_tree_visual.dot")
             with open(visual_file_path, "w") as f:
                 f.write(graphviz_str)
-            print(f"Generated tree visualization for {seq_record.id} at {visual_file_path}")
+            print(f"Generated tree visualization for {seq_record.id}")
         
         # Only collect reference sequences if tracking is enabled
         used_refs = None
