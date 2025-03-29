@@ -752,14 +752,23 @@ def sort_multiple_lists(base: list, *lists: list,
 
 def create_sequence_record(seq: str, id: str) -> SeqRecord:
     """
-    Create a BioPython SeqRecord object for a sequence.
+    Create a BioPython SeqRecord object from a sequence string and ID.
 
-    Args:
-        seq (str): The sequence string
-        id (str): The id of the sequence
+    This function takes a biological sequence string and an identifier,
+    and returns a SeqRecord object from the BioPython library.
 
-    Returns:
-        SeqRecord: BioPython SeqRecord object for the sequence
+    :param seq: The biological sequence as a string
+    :type seq: str
+    :param id: The unique identifier for the sequence
+    :type id: str
+    :return: A SeqRecord object containing the sequence and its metadata
+    :rtype: SeqRecord
+
+    Example::
+
+        >>> record = create_sequence_record("ATGC", "seq1")
+        >>> print(record.id)
+        seq1
     """
     return SeqRecord(Seq(seq), id=id, description="")
 
