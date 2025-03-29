@@ -845,7 +845,7 @@ def _find_ref_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
     if os.path.exists(path) and os.path.isdir(path):
         ref_lib_files: List[str] = []
         for file in os.listdir(path):
-            if file.endswith((".fa", ".fasta")):
+            if file.endswith((".fa", ".fa")):
                 ref_lib_files.append(os.path.join(path, file))
         if ref_lib_files:
             return list(map(os.path.abspath, ref_lib_files))
@@ -858,7 +858,7 @@ def _find_ref_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
         elif os.path.isdir(default_ref_lib_abs_path):
             ref_lib_files: List[str] = []
             for file in os.listdir(default_ref_lib_abs_path):
-                if file.endswith((".fa", ".fasta")):
+                if file.endswith((".fa", ".fa")):
                     ref_lib_files.append(os.path.join(default_ref_lib_abs_path, file))
             if ref_lib_files:
                 return ref_lib_files
@@ -1177,11 +1177,11 @@ class SeqGenerator:
         # Add batch suffix to filenames if multiple batches
         suffix = f"_batch{batch_num}" if self.batch > 1 else ""
         print(f"Saving {len(sequences)} processed sequences")
-        output_dict = {f"sequences{suffix}.fasta": sequences}
+        output_dict = {f"sequences{suffix}.fa": sequences}
         
         if self.flag_track and references:
             print(f"Saving {len(references)} reference sequence records")
-            output_dict[f"used_refs{suffix}.fasta"] = references
+            output_dict[f"used_refs{suffix}.fa"] = references
         
         save_multi_fasta_from_dict(output_dict, output_dir)
 
@@ -1210,11 +1210,7 @@ class SeqGenerator:
             total_elapsed_time (float): Total time taken for all batches
         """
         print(f"\nAll batches completed in {total_elapsed_time:.2g} seconds")
-        
-        if self.batch > 1:
-            print(f"Results saved to {os.path.abspath(self.output_dir)} with filenames sequences_batch[1-{self.batch}].fasta")
-        else:
-            print(f"Results saved to {os.path.abspath(self.output_dir)}")
+        print(f"Results saved to \"{os.path.abspath(self.output_dir)}\"")
 
     def execute(self):
         """
@@ -1250,7 +1246,7 @@ def main():
                        help="Input sequence file in FASTA format. Contains the target sequences to be inserted into.",
                        type=str, required=True, metavar="FILE")
     core_group.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_ABS_PATH, metavar="DIR",
-                       help=f"Output directory path. Generated sequences and related files will be saved here. Default: '{DEFAULT_OUTPUT_DIR_ABS_PATH}'")
+                       help=f"Output directory path. Generated sequences and related files will be saved here. Default: \"{DEFAULT_OUTPUT_DIR_ABS_PATH}\"")
 
     core_group.add_argument("-is", "--insert", metavar="INT/STR",
                        help="Number of insertions per sequence. Accepts either a plain number (e.g., 100) or a string with k/m suffix (e.g., 1k, 1m).",
