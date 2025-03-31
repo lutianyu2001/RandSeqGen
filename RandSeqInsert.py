@@ -12,7 +12,8 @@ Date: 2024-11-27
 import os
 import argparse
 import random
-from typing import List, Optional, Union, Callable, Tuple, Dict
+import re
+from typing import Tuple, List, Dict, Iterable, Sequence, Union, Optional, Callable
 import multiprocessing as mp
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -659,50 +660,114 @@ class SequenceNode:
 # ======================================================================================================================
 
 
-def process_humanized_int(number: Union[str, int]) -> int:
+def convert_humanized_number(text: str, base: Union[float, int], units: Sequence[Union[str, Iterable[str]]]) -> float:
     """
-    Process a number string to return the integer.
+    Convert human-readable numbers with unit suffixes to numerical values.
 
-    This function converts various number formats (plain number, k, m) into
-    the actual integer.
+    Parses strings containing numbers with optional unit suffixes and converts them
+    to raw numerical values based on the provided base and unit definitions.
 
-    Args:
-        number (Union[str, int]): Should be a string specifying number:
-            - A plain number (e.g., "100")
-            - Kilo with 'k' suffix (e.g., "1k")
-            - Mega with 'm' suffix (e.g., "1m")
-            If the number is an integer, it will be returned as is.
-
-    Returns:
-        int: The integer represented by the number string.
-
-    Raises:
-        ValueError: If the number string format is invalid.
+    :param text: Input string containing the number and optional unit suffix.
+                Supports scientific notation.
+    :type text: str
+    :param base: Numerical base for unit conversion (e.g., 1000 or 1024).
+    :type base: Union[float, int]
+    :param units: Sequence of unit suffixes/aliases ordered by increasing scale.
+                  Can contain strings or iterables of aliases for each unit.
+                  Must start from the base unit. Use empty string for unitless case.
+    :type units: Sequence[Union[str, Iterable[str]]]
+    :return: The converted numerical value.
+    :rtype: float
+    :raises ValueError: If the input format is invalid or contains unrecognized units.
 
     Examples:
-        >>> process_humanized_int("100")
-        100
-        >>> process_humanized_int("1k")
-        1000
-        >>> process_humanized_int("1m")
-        1000000
+        >>> convert_humanized_number("1.14 kbp", 1000, ["bp", ("kbp", "kb"), ("Mbp", "Mb")])
+        1140.0
+        >>> convert_humanized_number("5.14", 1024, ('B', "KiB", "MiB", "GiB"))
+        5.14
+        >>> convert_humanized_number("1.919e-3M", 1000, ("", 'K', 'M', 'B', 'T'))
+        1919.0
     """
-    if isinstance(number, int):
+    match = re.fullmatch(
+        r"\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-zA-Z]*)",
+        text.strip()
+    )
+    if not match:
+        raise ValueError(f"Invalid format: \"{text}\"")
+
+    num_str, raw_unit = match.groups()
+
+    try:
+        number = float(num_str)
+    except ValueError:
+        raise ValueError(f"Invalid number: \"{num_str}\"")
+
+    if not raw_unit:
         return number
 
-    number = number.lower()
+    target_unit = raw_unit.lower()
+    try:
+        unit_index = next(index for index, entry in enumerate(units)
+                          if any(unit.lower() == target_unit for unit in
+                                 (entry if isinstance(entry, Iterable) and
+                                           not isinstance(entry, str) else (entry,))))
+    except StopIteration:
+        raise ValueError(f"Unknown unit \"{raw_unit}\"")
 
-    # Check for k/m suffix
-    if number.endswith('k'):
-        return int(float(number[:-1]) * 1000)
-    elif number.endswith('m'):
-        return int(float(number[:-1]) * 1000000)
+    return number * (base ** unit_index)
 
-    # Check if pure number
-    if number.isdigit():
-        return int(number)
 
-    raise ValueError("[ERROR] Invalid format. Use plain number, k or m (e.g. 100, 1k, 1m)")
+def convert_humanized_int(number: Union[str, int]) -> int:
+    if isinstance(number, int):
+        return number
+    return int(convert_humanized_number(number, 1000, ("", 'K', 'M', 'B', 'T')))
+
+
+#
+# def convert_humanized_int(number: Union[str, int]) -> int:
+#     """
+#     Process a number string to return the integer.
+#
+#     This function converts various number formats (plain number, k, m) into
+#     the actual integer.
+#
+#     Args:
+#         number (Union[str, int]): Should be a string specifying number:
+#             - A plain number (e.g., "100")
+#             - Kilo with 'k' suffix (e.g., "1k")
+#             - Mega with 'm' suffix (e.g., "1m")
+#             If the number is an integer, it will be returned as is.
+#
+#     Returns:
+#         int: The integer represented by the number string.
+#
+#     Raises:
+#         ValueError: If the number string format is invalid.
+#
+#     Examples:
+#         >>> convert_humanized_int("100")
+#         100
+#         >>> convert_humanized_int("1k")
+#         1000
+#         >>> convert_humanized_int("1m")
+#         1000000
+#     """
+#     if isinstance(number, int):
+#         return number
+#
+#     number = number.lower()
+#
+#     # Check for k/m suffix
+#     if number.endswith('k'):
+#         return int(float(number[:-1]) * 1000)
+#     elif number.endswith('m'):
+#         return int(float(number[:-1]) * 1000000)
+#
+#     # Check if pure number
+#     if number.isdigit():
+#         return int(number)
+#
+#     raise ValueError("[ERROR] Invalid format. Use plain number, k or m (e.g. 100, 1k, 1m)")
 
 
 def sort_multiple_lists(base: list, *lists: list,
@@ -939,7 +1004,7 @@ class SeqGenerator:
             insertion (Union[str, int]): Number of insertions per sequence
             batch (int): Number of independent result files to generate
             processors (int): Number of processors to use
-            output_dir (str): Directory to save output files
+            output_dir_path (str): Directory to save output files
             ref_lib (List[str], optional): List of reference library file paths
             ref_lib_weight (List[float], optional): Weights for reference libraries
             ref_len_limit (int, optional): Maximum length limit for reference sequences to load
@@ -949,20 +1014,20 @@ class SeqGenerator:
             flag_visual (bool): Whether to generate graphviz visualization of the sequence tree
             flag_recursive (bool): Whether to use recursive insertion method
         """
-        self.input_file = input_file
-        self.insertion = process_humanized_int(insertion)
-        self.batch = batch
-        self.processors = processors
-        self.output_dir = output_dir_path
-        self.ref_len_limit = ref_len_limit
-        self.flag_filter_n = flag_filter_n
-        self.flag_track = flag_track
-        self.tsd_length = tsd_length
-        self.flag_visual = flag_visual
-        self.flag_recursive = flag_recursive
+        self.input_file: str = input_file
+        self.insertion: int = convert_humanized_int(insertion)
+        self.batch: int = batch
+        self.processors: int = processors
+        self.output_dir_path: str = output_dir_path
+        self.ref_len_limit: Optional[int] = ref_len_limit
+        self.flag_filter_n: bool = flag_filter_n
+        self.flag_track: bool = flag_track
+        self.tsd_length: Optional[int] = tsd_length
+        self.flag_visual: bool = flag_visual
+        self.flag_recursive: bool = flag_recursive
 
         # Load input sequence
-        self.input = list(SeqIO.parse(input_file, "fasta"))
+        self.input: List[SeqRecord] = list(SeqIO.parse(input_file, "fasta"))
         if not self.input:
             raise ValueError(f"[ERROR] No sequences found in input file {input_file}")
 
@@ -980,8 +1045,8 @@ class SeqGenerator:
         """
         Perform pre-execution checks.
         """
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
+        if not os.path.exists(self.output_dir_path):
+            os.makedirs(self.output_dir_path)
 
     def __process_single_sequence(self, seq_record: SeqRecord) -> Tuple[SeqRecord, Optional[List[SeqRecord]]]:
         """
@@ -1026,7 +1091,7 @@ class SeqGenerator:
         # Generate graphviz visualization if requested
         if self.flag_visual:
             graphviz_str = root.to_graphviz(node_id_prefix=seq_record.id)
-            visual_dir_path = os.path.join(self.output_dir, TREE_VISUAL_DIR_NAME)
+            visual_dir_path = os.path.join(self.output_dir_path, TREE_VISUAL_DIR_NAME)
             os.makedirs(visual_dir_path, exist_ok=True)
             visual_file_path = os.path.join(visual_dir_path, f"{seq_record.id}_tree_visual.dot")
             with open(visual_file_path, "w") as f:
@@ -1160,11 +1225,11 @@ class SeqGenerator:
         else:
             all_sequences, all_refs = self.__process_batch_single_thread(total_sequences)
         
-        os.makedirs(self.output_dir, exist_ok=True)
-        print(f"Output directory: {self.output_dir}")
+        os.makedirs(self.output_dir_path, exist_ok=True)
+        print(f"Output directory: {self.output_dir_path}")
 
         # Save results for this batch
-        self.__save_batch_results(self.output_dir, all_sequences, all_refs, batch_num)
+        self.__save_batch_results(self.output_dir_path, all_sequences, all_refs, batch_num)
         
         batch_elapsed_time = time.time() - batch_start_time
         print(f"Batch {batch_num} completed in {batch_elapsed_time:.2g} seconds")
@@ -1219,7 +1284,7 @@ class SeqGenerator:
             total_elapsed_time (float): Total time taken for all batches
         """
         print(f"\nAll batches completed in {total_elapsed_time:.2g} seconds")
-        print(f"Results saved to \"{os.path.abspath(self.output_dir)}\"")
+        print(f"Results saved to \"{os.path.abspath(self.output_dir_path)}\"")
 
     def execute(self):
         """
