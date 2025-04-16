@@ -5,7 +5,7 @@ Random Sequence Insertion Generator
 This program takes an input sequence and performs random insertions using sequences
 from a reference library. It supports multiprocessing for efficient sequence generation.
 
-Author: Tianyu Lu (tlu83@wisc.edu)
+Author: Tianyu Lu (tianyu@lu.fm)
 Date: 2024-11-27
 """
 
@@ -175,7 +175,8 @@ class SequenceNode:
         """
         # Initialize the DOT string with graph declaration
         dot_str = ['digraph SequenceTree {',
-                   '  node [shape=box, style=filled];']
+                   '  node [fontcolor="#000", shape=box, style=filled];',
+                   '  edge [fontcolor="#000"];']
 
         # Generate nodes and edges through recursive traversal
         nodes, edges = self.__build_graphviz_nodes_edges(node_id_prefix, abs_pos)
@@ -214,7 +215,7 @@ class SequenceNode:
         node_id = f"{node_id_prefix}_{start_pos}_{end_pos}"
         
         # Determine node type and color
-        node_type = "REF" if self.is_reference else "SRC"
+        node_type = "Donor" if self.is_reference else "Acceptor"
         fill_color = "lightblue" if self.is_reference else "lightgreen"
         
         # Create node label with position information
