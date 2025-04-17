@@ -21,8 +21,7 @@ from Bio.SeqRecord import SeqRecord
 import time
 
 VERSION = "v1.0.0"
-INFO = ("by Tianyu (Sky) Lu (tianyu@lu.fm)\n"
-        "For TEGE Research")
+INFO = ("by Tianyu (Sky) Lu (tianyu@lu.fm) released under GPLv3")
 
 PROGRAM_ROOT_DIR_ABS_PATH = os.path.dirname(__file__)
 
@@ -76,17 +75,16 @@ def add_indel_mutation(seq: str) -> str:
 
     # 50% probability of insertion or deletion
     is_insertion = random.choice([True, False])
-
-    # Choose mutation position (avoid the last position)
-    pos = random.randrange(len(seq)-1)
     new_base = random.choice("ATGC")
 
     if is_insertion:
-        # Insert new base and remove last base to maintain length
-        return seq[:pos] + new_base + seq[pos:-1]
+        # Choose insertion position (n + 1 positions)
+        pos = random.randrange(len(seq) + 1)
+        return seq[:pos] + new_base + seq[pos:]
     else:
-        # Delete base and append random base at the end
-        return seq[:pos] + seq[pos+1:] + new_base
+        # Choose deletion position (n positions)
+        pos = random.randrange(len(seq))
+        return seq[:pos] + seq[pos+1:]
 
 
 def generate_TSD(seq_slice: str,
@@ -96,7 +94,7 @@ def generate_TSD(seq_slice: str,
     """Generate TSD sequences with potential mutations.
 
     Args:
-        seq_slice (str): Target sequence fragment
+        seq_slice (str): Acceptor sequence fragment
         length (int): TSD length (defaults to seq_slice length)
         snp (float): SNP mutation probability
         indel (float): Indel mutation probability
@@ -133,18 +131,18 @@ class SequenceNode:
     Node in a sequence tree structure, used for efficient sequence insertion operations.
     Implemented as an AVL tree to maintain balance during insertions.
     """
-    def __init__(self, content: str, is_reference: bool = False, metadata: dict = None):
+    def __init__(self, content: str, is_donor: bool = False, metadata: dict = None):
         """
         Initialize a sequence node.
 
         Args:
             content (str): The sequence content
-            is_reference (bool): Whether this node contains a reference sequence
+            is_donor (bool): Whether this node contains a donor sequence
             metadata: Additional information about the node (such as position)
         """
         self.content = content
         self.length = len(content)
-        self.is_reference = is_reference
+        self.is_donor = is_donor
         self.metadata = metadata
         self.left = None
         self.right = None
@@ -215,8 +213,8 @@ class SequenceNode:
         node_id = f"{node_id_prefix}_{start_pos}_{end_pos}"
         
         # Determine node type and color
-        node_type = "Donor" if self.is_reference else "Acceptor"
-        fill_color = "lightblue" if self.is_reference else "lightgreen"
+        node_type = "Donor" if self.is_donor else "Acceptor"
+        fill_color = "lightblue" if self.is_donor else "lightgreen"
         
         # Create node label with position information
         label = f"{node_type}\\nStart: {start_pos}\\nEnd: {end_pos}\\nLength: {self.length}"
@@ -375,14 +373,14 @@ class SequenceNode:
         """Get balance factor of right child"""
         return self.right.__get_balance() if self.right else 0
 
-    def insert(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
+    def insert(self, abs_position: int, donor_seq: str, donor_metadata) -> "SequenceNode":
         """
-        Insert a reference sequence at the absolute position in the tree (iterative implementation).
+        Insert a donor sequence at the absolute position in the tree (iterative implementation).
 
         Args:
             abs_position (int): Absolute position in the tree to insert at
-            ref_seq (str): Reference sequence to insert
-            ref_metadata: Metadata for the reference
+            donor_seq (str): Donor sequence to insert
+            donor_metadata: Metadata for the donor
 
         Returns:
             SequenceNode: Root node after insertion
@@ -406,7 +404,7 @@ class SequenceNode:
                     current = current.left
                 else:
                     # Create new left child node
-                    current.left = SequenceNode(ref_seq, True, ref_metadata)
+                    current.left = SequenceNode(donor_seq, True, donor_metadata)
                     current.__update_total_length()
                     current.__update_height()
                     break
@@ -419,7 +417,7 @@ class SequenceNode:
                 right_content = current.content[rel_pos:]
                 
                 # Handle TSD generation
-                tsd_length = ref_metadata.get("tsd_length", 0) if ref_metadata else 0
+                tsd_length = donor_metadata.get("tsd_length", 0) if donor_metadata else 0
                 if tsd_length > 0:
                     # Extract source TSD sequence from the original sequence
                     source_tsd_seq = right_content[:min(tsd_length, len(right_content))]
@@ -436,24 +434,24 @@ class SequenceNode:
                     right_content = tsd_3 + right_content
                 
                 # Create new left child with left content
-                new_left = SequenceNode(left_content, current.is_reference, current.metadata)
+                new_left = SequenceNode(left_content, current.is_donor, current.metadata)
                 if current.left:
                     new_left.left = current.left
                     new_left.__update_total_length()
                     new_left.__update_height()
 
                 # Create new right child with right content and original right child
-                new_right = SequenceNode(right_content, current.is_reference, current.metadata)
+                new_right = SequenceNode(right_content, current.is_donor, current.metadata)
                 if current.right:
                     new_right.right = current.right
                     new_right.__update_total_length()
                     new_right.__update_height()
 
                 # Replace current node's content
-                current.content = ref_seq
-                current.length = len(ref_seq)
-                current.is_reference = True
-                current.metadata = ref_metadata
+                current.content = donor_seq
+                current.length = len(donor_seq)
+                current.is_donor = True
+                current.metadata = donor_metadata
 
                 # Set new children
                 current.left = new_left
@@ -473,7 +471,7 @@ class SequenceNode:
                     current = current.right
                 else:
                     # Create new right child node
-                    current.right = SequenceNode(ref_seq, True, ref_metadata)
+                    current.right = SequenceNode(donor_seq, True, donor_metadata)
                     current.__update_total_length()
                     current.__update_height()
                     break
@@ -505,14 +503,14 @@ class SequenceNode:
         return current if not parent_stack else self.__balance()
 
     # Potential bug?: May trigger "RecursionError: maximum recursion depth exceeded" in some cases
-    def insert_recursive(self, abs_position: int, ref_seq: str, ref_metadata) -> "SequenceNode":
+    def insert_recursive(self, abs_position: int, donor_seq: str, donor_metadata) -> "SequenceNode":
         """
-        Insert a reference sequence at the absolute position in the tree.
+        Insert a donor sequence at the absolute position in the tree.
 
         Args:
             abs_position (int): Absolute position in the tree to insert at
-            ref_seq (str): Reference sequence to insert
-            ref_metadata: Metadata for the reference
+            donor_seq (str): Donor sequence to insert
+            donor_metadata: Metadata for the donor
 
         Returns:
             SequenceNode: Root node after insertion
@@ -523,10 +521,10 @@ class SequenceNode:
         # Fast path: Position is before this node
         if abs_position <= left_length:
             if self.left:
-                self.left = self.left.insert_recursive(abs_position, ref_seq, ref_metadata)
+                self.left = self.left.insert_recursive(abs_position, donor_seq, donor_metadata)
             else:
                 # Insert as left child
-                self.left = SequenceNode(ref_seq, True, ref_metadata)
+                self.left = SequenceNode(donor_seq, True, donor_metadata)
             self.__update_total_length()
             self.__update_height()
             return self.__balance()
@@ -543,7 +541,7 @@ class SequenceNode:
             right_content = self.content[rel_pos:]
             
             # Handle TSD generation if requested in metadata
-            tsd_length = ref_metadata.get("tsd_length", 0) if ref_metadata else 0
+            tsd_length = donor_metadata.get("tsd_length", 0) if donor_metadata else 0
             if tsd_length > 0:
                 # Extract source TSD sequence from the original sequence
                 # We extract from the right side of the split point (beginning of right_content)
@@ -561,7 +559,7 @@ class SequenceNode:
                 right_content = tsd_3 + right_content
             
             # Create new left child with left content
-            new_left = SequenceNode(left_content, self.is_reference, self.metadata)
+            new_left = SequenceNode(left_content, self.is_donor, self.metadata)
             if self.left:
                 new_left.left = self.left
                 new_left.__update_total_length()
@@ -570,7 +568,7 @@ class SequenceNode:
                 new_left = new_left.__balance()
 
             # Create new right child with right content and original right child
-            new_right = SequenceNode(right_content, self.is_reference, self.metadata)
+            new_right = SequenceNode(right_content, self.is_donor, self.metadata)
             if self.right:
                 new_right.right = self.right
                 new_right.__update_total_length()
@@ -578,11 +576,11 @@ class SequenceNode:
                 # Ensure right subtree is balanced
                 new_right = new_right.__balance()
 
-            # Replace this node's content with the reference
-            self.content = ref_seq
-            self.length = len(ref_seq)
-            self.is_reference = True
-            self.metadata = ref_metadata
+            # Replace this node's content with the donor
+            self.content = donor_seq
+            self.length = len(donor_seq)
+            self.is_donor = True
+            self.metadata = donor_metadata
 
             # Set new children
             self.left = new_left
@@ -595,10 +593,10 @@ class SequenceNode:
         # Fast path: Position is after this node
         if abs_position >= node_end:
             if self.right:
-                self.right = self.right.insert_recursive(abs_position - node_end, ref_seq, ref_metadata)
+                self.right = self.right.insert_recursive(abs_position - node_end, donor_seq, donor_metadata)
             else:
                 # Insert as right child
-                self.right = SequenceNode(ref_seq, True, ref_metadata)
+                self.right = SequenceNode(donor_seq, True, donor_metadata)
             self.__update_total_length()
             self.__update_height()
             return self.__balance()
@@ -620,9 +618,9 @@ class SequenceNode:
 
         return result
 
-    def collect_refs(self, seq_id: str, abs_position: int = 0):
+    def collect_donors(self, seq_id: str, abs_position: int = 0):
         """
-        Collect reference nodes and calculate their absolute positions.
+        Collect donor nodes and calculate their absolute positions.
 
         Args:
             seq_id (str): ID of the original sequence
@@ -630,32 +628,32 @@ class SequenceNode:
 
         Returns:
             Tuple[List[SeqRecord], int]: A tuple containing:
-                - List of reference records
+                - List of donor records
                 - The total length of this subtree
         """
-        ref_records = []
+        donor_records = []
 
         left_length = 0
         if self.left:
-            left_refs, left_length = self.left.collect_refs(seq_id, abs_position)
-            ref_records.extend(left_refs)
+            left_donors, left_length = self.left.collect_donors(seq_id, abs_position)
+            donor_records.extend(left_donors)
 
         current_position = abs_position + left_length
 
-        if self.is_reference:
-            # Create a reference record with absolute position
+        if self.is_donor:
+            # Create a donor record with absolute position
             start_index = current_position
             end_index = start_index + self.length
-            ref_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
-            ref_record = create_sequence_record(self.content, ref_id)
-            ref_records.append(ref_record)
+            donor_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
+            donor_record = create_sequence_record(self.content, donor_id)
+            donor_records.append(donor_record)
 
         right_length = 0
         if self.right:
-            right_refs, right_length = self.right.collect_refs(seq_id, current_position + self.length)
-            ref_records.extend(right_refs)
+            right_donors, right_length = self.right.collect_donors(seq_id, current_position + self.length)
+            donor_records.extend(right_donors)
 
-        return ref_records, left_length + self.length + right_length
+        return donor_records, left_length + self.length + right_length
 
 
 # ======================================================================================================================
@@ -856,55 +854,55 @@ def save_multi_fasta_from_dict(records_dict: Dict[str, List[SeqRecord]], output_
 def load_sequences(path_list: Optional[List[str]], len_limit: Optional[int] = None,
                    flag_filter_n: bool = False) -> Optional[List[str]]:
     """
-    Load reference sequences from reference library files.
+    Load donor sequences from donor library files.
     Only loads sequences that meet the length criteria into memory.
     Sequences are stored as strings for efficient processing.
 
     Args:
-        path_list: List of paths to reference sequence files
+        path_list: List of paths to donor sequence files
         len_limit: Optional maximum length limit for sequences to load
         flag_filter_n: Flag to filter out sequences containing N
 
     Returns:
-        Optional[List[str]]: List of reference sequences as strings, or None if no reference paths provided
+        Optional[List[str]]: List of donor sequences as strings, or None if no donor paths provided
     """
     if not path_list:
         return None
 
-    ref_sequences: List[str] = []
+    donor_sequences: List[str] = []
     for file_path in path_list:
-        ref_sequences.extend([str(record.seq.upper()) for record in SeqIO.parse(file_path, "fasta") if
+        donor_sequences.extend([str(record.seq.upper()) for record in SeqIO.parse(file_path, "fasta") if
                               (len(record) <= len_limit if len_limit else True) and
                               ("N" not in record.seq.upper() if flag_filter_n else True)])
 
-    ref_sequences.sort(key=len)
-    return ref_sequences
+    donor_sequences.sort(key=len)
+    return donor_sequences
 
 
-def _find_ref_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
+def _find_donor_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
     """
-    Locate the reference library files.
+    Locate the donor library files.
 
-    This function attempts to find the given reference library directory or file in two locations:
+    This function attempts to find the given donor library directory or file in two locations:
     1. The directly specified path
     2. Under the default "lib" directory in the program root directory
 
     Args:
-        path (str): The path to search for reference library. Can be:
+        path (str): The path to search for donor library. Can be:
                         - An absolute path to a directory or file
                         - A relative path to a directory or file
 
     Returns:
-        Optional[List[str]]: A list containing the absolute paths to the found reference library files,
+        Optional[List[str]]: A list containing the absolute paths to the found donor library files,
                              or None if path is None.
 
     Raises:
-        SystemExit: If no valid reference library directory or file is found.
+        SystemExit: If no valid donor library directory or file is found.
 
     Examples:
-        >>> _find_ref_lib_abs_path_list("/abs/path/to/refs.fa")
-        ["/abs/path/to/refs.fa"]
-        >>> _find_ref_lib_abs_path_list("lib/rice")
+        >>> _find_donor_lib_abs_path_list("/abs/path/to/donors.fa")
+        ["/abs/path/to/donors.fa"]
+        >>> _find_donor_lib_abs_path_list("lib/rice")
         ["/path/to/program/lib/rice/rice_DTA.fa", "/path/to/program/lib/rice/rice_DTC.fa",
          "/path/to/program/lib/rice/rice_DTH.fa", "/path/to/program/lib/rice/rice_DTM.fa",
          "/path/to/program/lib/rice/rice_DTT.fa"]
@@ -918,84 +916,80 @@ def _find_ref_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
 
     # Check if path exists and is a directory
     if os.path.exists(path) and os.path.isdir(path):
-        ref_lib_files: List[str] = []
+        donor_lib_files: List[str] = []
         for file in os.listdir(path):
             if file.endswith((".fa", ".fa")):
-                ref_lib_files.append(os.path.join(path, file))
-        if ref_lib_files:
-            return list(map(os.path.abspath, ref_lib_files))
+                donor_lib_files.append(os.path.join(path, file))
+        if donor_lib_files:
+            return list(map(os.path.abspath, donor_lib_files))
 
-    # Check in built-in RefLib directory
-    default_ref_lib_abs_path = os.path.join(PROGRAM_ROOT_DIR_ABS_PATH, path)
-    if os.path.exists(default_ref_lib_abs_path):
-        if os.path.isfile(default_ref_lib_abs_path):
-            return [default_ref_lib_abs_path]
-        elif os.path.isdir(default_ref_lib_abs_path):
-            ref_lib_files: List[str] = []
-            for file in os.listdir(default_ref_lib_abs_path):
+    # Check in built-in DonorLib directory
+    default_donor_lib_abs_path = os.path.join(PROGRAM_ROOT_DIR_ABS_PATH, path)
+    if os.path.exists(default_donor_lib_abs_path):
+        if os.path.isfile(default_donor_lib_abs_path):
+            return [default_donor_lib_abs_path]
+        elif os.path.isdir(default_donor_lib_abs_path):
+            donor_lib_files: List[str] = []
+            for file in os.listdir(default_donor_lib_abs_path):
                 if file.endswith((".fa", ".fa")):
-                    ref_lib_files.append(os.path.join(default_ref_lib_abs_path, file))
-            if ref_lib_files:
-                return ref_lib_files
+                    donor_lib_files.append(os.path.join(default_donor_lib_abs_path, file))
+            if donor_lib_files:
+                return donor_lib_files
 
-    raise SystemExit(f"[ERROR] Specified reference library not found at {path} or built-in reference library!")
+    raise SystemExit(f"[ERROR] Specified donor library not found at {path} or built-in donor library!")
 
 
-def _load_multiple_ref_libs(path_list: List[str], weight_list: Optional[List[float]] = None,
+def _load_multiple_donor_libs(path_list: List[str], weight_list: Optional[List[float]] = None,
                             len_limit: Optional[int] = None,
                             flag_filter_n: bool = False) -> Optional[Tuple[List[str], List[int], List[float]]]:
     """
-    Load multiple reference libraries by combining their sequences.
+    Load multiple donor libraries by combining their sequences.
 
     Args:
-        path_list (List[str]): List of paths to reference libraries
-        weight_list (Optional[List[float]]): List of weights for each reference library
+        path_list (List[str]): List of paths to donor libraries
+        weight_list (Optional[List[float]]): List of weights for each donor library
         len_limit (Optional[int]): Maximum length limit for sequences to load
         flag_filter_n (bool): Flag to filter out sequences containing N
 
     Returns:
         Tuple[List[str], List[int], List[float]] (Optional):
-            - List[str]: Combined list of reference sequences from all libraries
-            - List[int]: List of lengths of reference sequences
-            - List[float]: List of weights for each reference sequence
+            - List[str]: Combined list of donor sequences from all libraries
+            - List[int]: List of lengths of donor sequences
+            - List[float]: List of weights for each donor sequence
     """
     if not path_list:
         return None
 
-    all_ref_sequence_list: List[str] = []
-    all_ref_len_list: List[int] = []
-    all_ref_weight_list: List[float] = []
+    all_donor_sequence_list: List[str] = []
+    all_donor_len_list: List[int] = []
+    all_donor_weight_list: List[float] = []
 
     for path_list, weight in zip(path_list, weight_list or [None] * len(path_list)):
-        single_ref_lib_abs_path_list = _find_ref_lib_abs_path_list(path_list)
-        if single_ref_lib_abs_path_list:
-            single_ref_lib_sequences = load_sequences(single_ref_lib_abs_path_list, len_limit, flag_filter_n)
-            if single_ref_lib_sequences:
-                all_ref_sequence_list.extend(single_ref_lib_sequences)
-                all_ref_len_list.extend([len(seq) for seq in single_ref_lib_sequences])
+        single_donor_lib_abs_path_list = _find_donor_lib_abs_path_list(path_list)
+        if single_donor_lib_abs_path_list:
+            single_donor_lib_sequences = load_sequences(single_donor_lib_abs_path_list, len_limit, flag_filter_n)
+            if single_donor_lib_sequences:
+                all_donor_sequence_list.extend(single_donor_lib_sequences)
+                all_donor_len_list.extend([len(seq) for seq in single_donor_lib_sequences])
                 if weight:
-                    len_single_ref_lib_sequences = len(single_ref_lib_sequences)
-                    all_ref_weight_list.extend([weight / len_single_ref_lib_sequences] * len_single_ref_lib_sequences)
+                    len_single_donor_lib_sequences = len(single_donor_lib_sequences)
+                    all_donor_weight_list.extend([weight / len_single_donor_lib_sequences] * len_single_donor_lib_sequences)
 
-    # return sort_multiple_lists(all_ref_sequence_list, all_ref_weight_list, key=len)
-    all_ref_len_list, all_ref_sequence_list, all_ref_weight_list = sort_multiple_lists(
-        all_ref_len_list, all_ref_sequence_list, all_ref_weight_list)
+    # return sort_multiple_lists(all_donor_sequence_list, all_donor_weight_list, key=len)
+    all_donor_len_list, all_donor_sequence_list, all_donor_weight_list = sort_multiple_lists(
+        all_donor_len_list, all_donor_sequence_list, all_donor_weight_list)
 
     # Uniform weights by default: If no weight provided, set all weights to 1
     if not weight_list:
-        all_ref_weight_list = [1] * len(all_ref_sequence_list)
+        all_donor_weight_list = [1] * len(all_donor_sequence_list)
 
-    return all_ref_sequence_list, all_ref_len_list, all_ref_weight_list
+    return all_donor_sequence_list, all_donor_len_list, all_donor_weight_list
 
 
 class SeqGenerator:
-    """
-    Class for generating sequences with random insertions from reference libraries.
-    """
-
     def __init__(self, input_file: str, insertion: Union[str, int], batch: int, processors: int, output_dir_path: str,
-                 ref_lib: Optional[List[str]] = None, ref_lib_weight: Optional[List[float]] = None,
-                 ref_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
+                 donor_lib: Optional[List[str]] = None, donor_lib_weight: Optional[List[float]] = None,
+                 donor_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
                  tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False):
         """
         Initialize the sequence generator.
@@ -1006,11 +1000,11 @@ class SeqGenerator:
             batch (int): Number of independent result files to generate
             processors (int): Number of processors to use
             output_dir_path (str): Directory to save output files
-            ref_lib (List[str], optional): List of reference library file paths
-            ref_lib_weight (List[float], optional): Weights for reference libraries
-            ref_len_limit (int, optional): Maximum length limit for reference sequences to load
+            donor_lib (List[str], optional): List of donor library file paths
+            donor_lib_weight (List[float], optional): Weights for donor libraries
+            donor_len_limit (int, optional): Maximum length limit for donor sequences to load
             flag_filter_n (bool): Whether to filter out sequences containing N
-            flag_track (bool): Whether to track reference sequences used
+            flag_track (bool): Whether to track donor sequences used
             tsd_length (int, optional): Length of Target Site Duplication (TSD) to generate
             flag_visual (bool): Whether to generate graphviz visualization of the sequence tree
             flag_recursive (bool): Whether to use recursive insertion method
@@ -1020,7 +1014,7 @@ class SeqGenerator:
         self.batch: int = batch
         self.processors: int = processors
         self.output_dir_path: str = output_dir_path
-        self.ref_len_limit: Optional[int] = ref_len_limit
+        self.donor_len_limit: Optional[int] = donor_len_limit
         self.flag_filter_n: bool = flag_filter_n
         self.flag_track: bool = flag_track
         self.tsd_length: Optional[int] = tsd_length
@@ -1032,15 +1026,15 @@ class SeqGenerator:
         if not self.input:
             raise ValueError(f"[ERROR] No sequences found in input file {input_file}")
 
-        # Load reference sequences
-        if ref_lib:
-            ref_lib_data = _load_multiple_ref_libs(ref_lib, ref_lib_weight, ref_len_limit, flag_filter_n)
-            if ref_lib_data:
-                self.ref_sequences, _, self.ref_weights = ref_lib_data
+        # Load donor sequences
+        if donor_lib:
+            donor_lib_data = _load_multiple_donor_libs(donor_lib, donor_lib_weight, donor_len_limit, flag_filter_n)
+            if donor_lib_data:
+                self.donor_sequences, _, self.donor_weights = donor_lib_data
             else:
-                raise SystemExit("[ERROR] No valid reference sequences loaded")
+                raise SystemExit("[ERROR] No valid donor sequences loaded")
         else:
-            raise SystemExit("[ERROR] Reference library is required for insertion")
+            raise SystemExit("[ERROR] Donor library is required for insertion")
 
     def __pre_check(self):
         """
@@ -1058,7 +1052,7 @@ class SeqGenerator:
             
         Returns:
             Tuple[SeqRecord, Optional[List[SeqRecord]]]: 
-                The processed sequence and used references if tracking
+                The processed sequence and used donors if tracking
         """
         # Start with a single node containing the original sequence
         root = SequenceNode(str(seq_record.seq))
@@ -1066,21 +1060,21 @@ class SeqGenerator:
         # Get the current total sequence length
         total_length = root.total_length
         
-        # Generate all insertion positions and reference sequences at once
+        # Generate all insertion positions and donor sequences at once
         insert_positions = random.choices(range(total_length + 1), k=self.insertion)
-        selected_refs = random.choices(self.ref_sequences, weights=self.ref_weights, k=self.insertion)
+        selected_donors = random.choices(self.donor_sequences, weights=self.donor_weights, k=self.insertion)
         
         # Sort positions in descending order to maintain position integrity during insertion
         # This ensures earlier insertions don't affect the positions of later insertions
-        insert_positions, selected_refs = sort_multiple_lists(insert_positions, selected_refs, reverse=True)
+        insert_positions, selected_donors = sort_multiple_lists(insert_positions, selected_donors, reverse=True)
         
-        # Insert references directly into the tree in optimal order
-        for pos, ref_seq in zip(insert_positions, selected_refs):
+        # Insert donors directly into the tree in optimal order
+        for pos, donor_seq in zip(insert_positions, selected_donors):
             metadata = {"tsd_length": self.tsd_length} if self.tsd_length else {}
             if self.flag_recursive:
-                root = root.insert_recursive(pos, ref_seq, metadata)
+                root = root.insert_recursive(pos, donor_seq, metadata)
             else:
-                root = root.insert(pos, ref_seq, metadata)
+                root = root.insert(pos, donor_seq, metadata)
         
         # Generate final sequence
         final_seq = str(root)
@@ -1099,12 +1093,12 @@ class SeqGenerator:
                 f.write(graphviz_str)
             print(f"Generated tree visualization for {seq_record.id}")
         
-        # Only collect reference sequences if tracking is enabled
-        used_refs = None
+        # Only collect donor sequences if tracking is enabled
+        used_donors = None
         if self.flag_track:
-            used_refs, _ = root.collect_refs(seq_record.id)
+            used_donors, _ = root.collect_donors(seq_record.id)
         
-        return new_seq_record, used_refs
+        return new_seq_record, used_donors
 
     def _process_chunk(self, chunk_idx: int, chunk_size: int, total_sequences: int) -> Tuple[List[SeqRecord], 
                                                                                           Optional[List[SeqRecord]]]:
@@ -1118,23 +1112,23 @@ class SeqGenerator:
             
         Returns:
             Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: 
-                The processed sequences and used references if tracking
+                The processed sequences and used donors if tracking
         """
         start_idx = chunk_idx * chunk_size
         end_idx = min(start_idx + chunk_size, total_sequences)
         
         processed_seqs = []
-        used_refs = [] if self.flag_track else None
+        used_donors = [] if self.flag_track else None
         
         for i in range(start_idx, end_idx):
             seq_record = self.input[i]
-            processed_seq, refs = self.__process_single_sequence(seq_record)
+            processed_seq, donors = self.__process_single_sequence(seq_record)
             processed_seqs.append(processed_seq)
             
-            if self.flag_track and refs:
-                used_refs.extend(refs)
+            if self.flag_track and donors:
+                used_donors.extend(donors)
             
-        return processed_seqs, used_refs
+        return processed_seqs, used_donors
 
     def __process_batch_multiprocessing(self, total_sequences: int) -> Tuple[List[SeqRecord], 
                                                                               Optional[List[SeqRecord]]]:
@@ -1146,7 +1140,7 @@ class SeqGenerator:
             
         Returns:
             Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: 
-                All processed sequences and references
+                All processed sequences and donors
         """
         # Calculate proper chunk size for work division
         chunk_size = max(1, total_sequences // (self.processors * 4))
@@ -1160,18 +1154,18 @@ class SeqGenerator:
         
         # Process chunks in parallel
         all_sequences = []
-        all_refs = [] if self.flag_track else None
+        all_donors = [] if self.flag_track else None
         
         with mp.Pool(self.processors) as pool:
             results_iter = pool.starmap(self._process_chunk, chunk_args)
             
-            for i, (seqs, refs) in enumerate(results_iter, 1):
+            for i, (seqs, donors) in enumerate(results_iter, 1):
                 all_sequences.extend(seqs)
-                if self.flag_track and refs:
-                    all_refs.extend(refs)
+                if self.flag_track and donors:
+                    all_donors.extend(donors)
                 print(f"Completed chunk {i}/{num_chunks}")
         
-        return all_sequences, all_refs
+        return all_sequences, all_donors
 
     def __process_batch_single_thread(self, total_sequences: int) -> Tuple[List[SeqRecord], 
                                                                            Optional[List[SeqRecord]]]:
@@ -1183,22 +1177,22 @@ class SeqGenerator:
             
         Returns:
             Tuple[List[SeqRecord], Optional[List[SeqRecord]]]: 
-                All processed sequences and references
+                All processed sequences and donors
         """
         all_sequences = []
-        all_refs = [] if self.flag_track else None
+        all_donors = [] if self.flag_track else None
         
         for i, seq_record in enumerate(self.input):
-            processed_seq, refs = self.__process_single_sequence(seq_record)
+            processed_seq, donors = self.__process_single_sequence(seq_record)
             all_sequences.append(processed_seq)
             
-            if self.flag_track and refs:
-                all_refs.extend(refs)
+            if self.flag_track and donors:
+                all_donors.extend(donors)
             
             if (i + 1) % 10 == 0 or i + 1 == total_sequences:
                 print(f"Processed {i+1}/{total_sequences} sequences")
         
-        return all_sequences, all_refs
+        return all_sequences, all_donors
 
     def __process_single_batch(self, batch_num: int) -> float:
         """
@@ -1222,15 +1216,15 @@ class SeqGenerator:
         
         # Divide work based on number of processors
         if self.processors > 1 and total_sequences > 1:
-            all_sequences, all_refs = self.__process_batch_multiprocessing(total_sequences)
+            all_sequences, all_donors = self.__process_batch_multiprocessing(total_sequences)
         else:
-            all_sequences, all_refs = self.__process_batch_single_thread(total_sequences)
+            all_sequences, all_donors = self.__process_batch_single_thread(total_sequences)
         
         os.makedirs(self.output_dir_path, exist_ok=True)
         print(f"Output directory: {self.output_dir_path}")
 
         # Save results for this batch
-        self.__save_batch_results(self.output_dir_path, all_sequences, all_refs, batch_num)
+        self.__save_batch_results(self.output_dir_path, all_sequences, all_donors, batch_num)
         
         batch_elapsed_time = time.time() - batch_start_time
         print(f"Batch {batch_num} completed in {batch_elapsed_time:.2g} seconds")
@@ -1238,7 +1232,7 @@ class SeqGenerator:
         return batch_elapsed_time
 
     def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], 
-                              references: Optional[List[SeqRecord]], 
+                              donors: Optional[List[SeqRecord]], 
                               batch_num: int = 1):
         """
         Save the batch results to output files.
@@ -1246,7 +1240,7 @@ class SeqGenerator:
         Args:
             output_dir (str): Directory to save the results
             sequences (List[SeqRecord]): List of sequence records to save
-            references (Optional[List[SeqRecord]]): List of reference records to save if tracking is enabled
+            donors (Optional[List[SeqRecord]]): List of donor records to save if tracking is enabled
             batch_num (int): The batch number (1-based index)
         """
         # Add batch suffix to filenames if multiple batches
@@ -1254,9 +1248,9 @@ class SeqGenerator:
         print(f"Saving {len(sequences)} processed sequences")
         output_dict = {f"sequences{suffix}.fa": sequences}
         
-        if self.flag_track and references:
-            print(f"Saving {len(references)} reference sequence records")
-            output_dict[f"used_refs{suffix}.fa"] = references
+        if self.flag_track and donors:
+            print(f"Saving {len(donors)} donor sequence records")
+            output_dict[f"used_donors{suffix}.fa"] = donors
         
         save_multi_fasta_from_dict(output_dict, output_dir)
 
@@ -1270,7 +1264,7 @@ class SeqGenerator:
         print(f"Insertion settings: {self.insertion} insertions per sequence")
         if self.tsd_length:
             print(f"TSD settings: Generating TSD of length {self.tsd_length} at insertion sites")
-        print(f"Reference library: {len(self.ref_sequences)} sequences loaded")
+        print(f"Donor library: {len(self.donor_sequences)} sequences loaded")
         print(f"Generating {self.batch} independent result file(s)")
         if self.flag_recursive:
             print(f"Using recursive insertion method")
@@ -1310,7 +1304,7 @@ def main():
     """Main function to handle command line arguments and execute the program."""
     parser = argparse.ArgumentParser(prog="RandSeqInsert",
                                      description="RandomSequenceInsertion: A high-performance Python tool for randomly inserting "
-                                               "genomic fragments from reference libraries into target sequences. "
+                                               "genomic fragments from donor libraries into acceptor sequences. "
                                                "It supports multiprocessing for efficient processing of large datasets.",
                                      epilog="")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}\n{INFO}")
@@ -1318,7 +1312,7 @@ def main():
     # Core Arguments
     core_group = parser.add_argument_group("Core Arguments")
     core_group.add_argument("-i", "--input",
-                       help="Input sequence file in FASTA format. Contains the target sequences to be inserted into.",
+                       help="Input sequence file in FASTA format. Contains the acceptor sequences to be inserted into.",
                        type=str, required=True, metavar="FILE")
     core_group.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR_ABS_PATH, metavar="DIR",
                        help=f"Output directory path. Generated sequences and related files will be saved here. Default: \"{DEFAULT_OUTPUT_DIR_ABS_PATH}\"")
@@ -1327,14 +1321,14 @@ def main():
                        help="Number of insertions per sequence. Accepts either a plain number (e.g., 100) or a string with k/m suffix (e.g., 1k, 1m).",
                        type=str, required=True)
 
-    # Reference Library Arguments
-    ref_group = parser.add_argument_group("Reference Library Arguments")
-    ref_group.add_argument("-r", "--reference", nargs="+", metavar="FILE/DIR", required=True,
-                            help="Reference sequence library file or directory paths. Multiple FASTA format reference files can be specified. Sequences from these files will be used as insertion fragments.")
-    ref_group.add_argument("-w", "--weight", type=float, nargs="+", metavar="FLOAT",
-                       help="Weights for reference libraries. Controls the probability of selecting sequences from different reference libraries. The number of weights should match the number of reference libraries.")
-    ref_group.add_argument("-l", "--limit", type=int, default=None, metavar="INT",
-                       help="Reference sequence length limit. Only loads reference sequences with length less than or equal to this value. Default: no limit.")
+    # Donor Library Arguments
+    donor_group = parser.add_argument_group("Donor Library Arguments")
+    donor_group.add_argument("-d", "--donor", nargs="+", metavar="FILE/DIR", required=True,
+                            help="Donor sequence library file or directory paths. Multiple FASTA format donor files can be specified. Sequences from these files will be selected and inserted into the acceptor sequences.")
+    donor_group.add_argument("-w", "--weight", type=float, nargs="+", metavar="FLOAT",
+                       help="Weights for donor libraries. Controls the probability of selecting sequences from different donor libraries. The number of weights should match the number of donor libraries.")
+    donor_group.add_argument("-l", "--limit", type=int, default=None, metavar="INT",
+                       help="Donor sequence length limit. Only loads donor sequences with length less than or equal to this value. Default: no limit.")
 
     # Control Arguments
     ctrl_group = parser.add_argument_group("Control Arguments")
@@ -1346,11 +1340,11 @@ def main():
     # Flags
     flag_group = parser.add_argument_group("Flags")
     flag_group.add_argument("--filter_n", action="store_true",
-                                help="Filter out sequences containing N. Enable this option to exclude reference sequences containing N bases.")
+                                help="Filter out donor sequences containing N.")
     flag_group.add_argument("--track", action="store_true",
-                       help="Track and save used reference sequences. Enable this option to generate an additional FASTA file in the output directory recording all used reference sequences and their insertion positions.")
+                       help="Track and save used donor sequences. Enable this option to generate an additional FASTA file in the output directory recording all used donor sequences and their insertion positions.")
     flag_group.add_argument("--tsd", type=int, metavar="LENGTH",
-                       help="Enable Target Site Duplication (TSD) with specified length. When a reference sequence is inserted, TSD of this length will be generated at the insertion site.")
+                       help="Enable Target Site Duplication (TSD) with specified length. When a donor sequence is inserted, TSD of this length will be generated at the insertion site.")
     flag_group.add_argument("--visual", action="store_true",
                        help="Generate Graphviz DOT files visualizing the tree structure of each sequence. Files will be named {seqid}_tree_visual.dot and saved in the output directory.")
     flag_group.add_argument("--recursive", action="store_true",
@@ -1364,9 +1358,9 @@ def main():
         batch=parsed_args.batch,
         processors=parsed_args.processors,
         output_dir_path=parsed_args.output,
-        ref_lib=parsed_args.reference,
-        ref_lib_weight=parsed_args.weight,
-        ref_len_limit=parsed_args.limit,
+        donor_lib=parsed_args.donor,
+        donor_lib_weight=parsed_args.weight,
+        donor_len_limit=parsed_args.limit,
         flag_filter_n=parsed_args.filter_n,
         flag_track=parsed_args.track,
         tsd_length=parsed_args.tsd,
