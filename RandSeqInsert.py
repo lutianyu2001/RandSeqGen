@@ -2,8 +2,8 @@
 """
 Random Sequence Insertion Generator
 
-This program takes an input sequence and performs random insertions using sequences
-from a reference library. It supports multiprocessing for efficient sequence generation.
+This program takes acceptor sequences and performs random insertions using sequences
+from a donor library. It supports multiprocessing for efficient sequence generation.
 
 Author: Tianyu Lu (tianyu@lu.fm)
 Date: 2024-11-27
@@ -131,21 +131,22 @@ class SequenceNode:
     Node in a sequence tree structure, used for efficient sequence insertion operations.
     Implemented as an AVL tree to maintain balance during insertions.
     """
-    def __init__(self, content: str, is_donor: bool = False, metadata: dict = None):
+    def __init__(self, data: str, is_donor: bool = False, attributes: dict = {}):
         """
         Initialize a sequence node.
 
         Args:
-            content (str): The sequence content
+            data (str): The sequence string
             is_donor (bool): Whether this node contains a donor sequence
-            metadata: Additional information about the node (such as position)
+            attributes: Additional information about the node (such as position)
         """
-        self.content = content
-        self.length = len(content)
+        self.data = data
+        self.length = len(data)
         self.is_donor = is_donor
-        self.metadata = metadata
+        self.attributes = attributes
         self.left = None
         self.right = None
+
         # Total length of the subtree for efficient traversal
         self.total_length = self.length
         # Height of the node for AVL balancing
@@ -158,9 +159,9 @@ class SequenceNode:
         Returns:
             str: The concatenated sequence
         """
-        return "".join(self.collect_content_in_order_traversal())
+        return "".join(self.collect_data_in_order_traversal())
 
-    def to_graphviz(self, node_id_prefix: str = "node", abs_pos: int = 0) -> str:
+    def to_graphviz_dot(self, node_id_prefix: str = "node", abs_pos: int = 0) -> str:
         """
         Generate Graphviz DOT format string for visualizing the tree structure.
         
@@ -172,23 +173,24 @@ class SequenceNode:
             str: Graphviz DOT format string
         """
         # Initialize the DOT string with graph declaration
-        dot_str = ['digraph SequenceTree {',
-                   '  node [fontcolor="#000", shape=box, style=filled];',
-                   '  edge [fontcolor="#000"];']
+        dot_str = ["digraph SequenceTree {",
+                   "  bgcolor=\"#FFF\"",
+                   "  node [fontcolor=\"#000\", shape=box, style=filled];",
+                   "  edge [fontcolor=\"#000\"];"]
 
         # Generate nodes and edges through recursive traversal
-        nodes, edges = self.__build_graphviz_nodes_edges(node_id_prefix, abs_pos)
+        nodes, edges = self.__build_graphviz_dot_nodes_edges(node_id_prefix, abs_pos)
         
         # Add all nodes and edges to the DOT string
         for node in nodes:
-            dot_str.append(f'  {node}')
+            dot_str.append(f"  {node}")
         for edge in edges:
-            dot_str.append(f'  {edge}')
+            dot_str.append(f"  {edge}")
         
         dot_str.append('}')
         return '\n'.join(dot_str)
     
-    def __build_graphviz_nodes_edges(self, node_id_prefix: str, abs_pos: int) -> tuple:
+    def __build_graphviz_dot_nodes_edges(self, node_id_prefix: str, abs_pos: int) -> tuple:
         """
         Recursively build nodes and edges for Graphviz visualization.
         
@@ -224,7 +226,7 @@ class SequenceNode:
         
         # Process left child if exists
         if self.left:
-            left_nodes, left_edges = self.left.__build_graphviz_nodes_edges(f"{node_id_prefix}_L", abs_pos)
+            left_nodes, left_edges = self.left.__build_graphviz_dot_nodes_edges(f"{node_id_prefix}_L", abs_pos)
             nodes.extend(left_nodes)
             edges.extend(left_edges)
             
@@ -240,7 +242,7 @@ class SequenceNode:
         # Process right child if exists
         if self.right:
             right_abs_pos = abs_pos + left_length + self.length
-            right_nodes, right_edges = self.right.__build_graphviz_nodes_edges(f"{node_id_prefix}_R", right_abs_pos)
+            right_nodes, right_edges = self.right.__build_graphviz_dot_nodes_edges(f"{node_id_prefix}_R", right_abs_pos)
             nodes.extend(right_nodes)
             edges.extend(right_edges)
             
@@ -373,14 +375,14 @@ class SequenceNode:
         """Get balance factor of right child"""
         return self.right.__get_balance() if self.right else 0
 
-    def insert(self, abs_position: int, donor_seq: str, donor_metadata) -> "SequenceNode":
+    def insert(self, abs_position: int, donor_seq: str, donor_attrs: dict) -> "SequenceNode":
         """
         Insert a donor sequence at the absolute position in the tree (iterative implementation).
 
         Args:
             abs_position (int): Absolute position in the tree to insert at
             donor_seq (str): Donor sequence to insert
-            donor_metadata: Metadata for the donor
+            donor_attrs: Attributes for the donor
 
         Returns:
             SequenceNode: Root node after insertion
@@ -404,7 +406,7 @@ class SequenceNode:
                     current = current.left
                 else:
                     # Create new left child node
-                    current.left = SequenceNode(donor_seq, True, donor_metadata)
+                    current.left = SequenceNode(donor_seq, True, donor_attrs)
                     current.__update_total_length()
                     current.__update_height()
                     break
@@ -413,45 +415,45 @@ class SequenceNode:
             elif node_start < abs_position < node_end:
                 # Calculate relative position
                 rel_pos = abs_position - node_start
-                left_content = current.content[:rel_pos]
-                right_content = current.content[rel_pos:]
+                left_data = current.data[:rel_pos]
+                right_data = current.data[rel_pos:]
                 
                 # Handle TSD generation
-                tsd_length = donor_metadata.get("tsd_length", 0) if donor_metadata else 0
+                tsd_length = donor_attrs.get("tsd_length", 0)
                 if tsd_length > 0:
                     # Extract source TSD sequence from the original sequence
-                    source_tsd_seq = right_content[:min(tsd_length, len(right_content))]
+                    source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
                     
                     # Generate TSD sequences (potentially with mutations)
                     tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
                     
-                    # Remove source TSD from right_content as it will be duplicated
+                    # Remove source TSD from right_data as it will be duplicated
                     if len(source_tsd_seq) > 0:
-                        right_content = right_content[len(source_tsd_seq):]
+                        right_data = right_data[len(source_tsd_seq):]
                     
-                    # Add TSD sequences to the left and right content
-                    left_content = left_content + tsd_5
-                    right_content = tsd_3 + right_content
+                    # Add TSD sequences to the left and right data
+                    left_data = left_data + tsd_5
+                    right_data = tsd_3 + right_data
                 
-                # Create new left child with left content
-                new_left = SequenceNode(left_content, current.is_donor, current.metadata)
+                # Create new left child with left data
+                new_left = SequenceNode(left_data, current.is_donor, current.attributes)
                 if current.left:
                     new_left.left = current.left
                     new_left.__update_total_length()
                     new_left.__update_height()
 
-                # Create new right child with right content and original right child
-                new_right = SequenceNode(right_content, current.is_donor, current.metadata)
+                # Create new right child with right data and original right child
+                new_right = SequenceNode(right_data, current.is_donor, current.attributes)
                 if current.right:
                     new_right.right = current.right
                     new_right.__update_total_length()
                     new_right.__update_height()
 
-                # Replace current node's content
-                current.content = donor_seq
+                # Replace current node's data with the donor sequence
+                current.data = donor_seq
                 current.length = len(donor_seq)
                 current.is_donor = True
-                current.metadata = donor_metadata
+                current.attributes = donor_attrs
 
                 # Set new children
                 current.left = new_left
@@ -459,7 +461,7 @@ class SequenceNode:
                 current.__update_total_length()
                 current.__update_height()
                 break
-            
+
             # Case 3: Position is in the current node's right subtree
             elif abs_position >= node_end:
                 if current.right:
@@ -471,7 +473,7 @@ class SequenceNode:
                     current = current.right
                 else:
                     # Create new right child node
-                    current.right = SequenceNode(donor_seq, True, donor_metadata)
+                    current.right = SequenceNode(donor_seq, True, donor_attrs)
                     current.__update_total_length()
                     current.__update_height()
                     break
@@ -503,14 +505,14 @@ class SequenceNode:
         return current if not parent_stack else self.__balance()
 
     # Potential bug?: May trigger "RecursionError: maximum recursion depth exceeded" in some cases
-    def insert_recursive(self, abs_position: int, donor_seq: str, donor_metadata) -> "SequenceNode":
+    def insert_recursive(self, abs_position: int, donor_seq: str, donor_attrs) -> "SequenceNode":
         """
         Insert a donor sequence at the absolute position in the tree.
 
         Args:
             abs_position (int): Absolute position in the tree to insert at
             donor_seq (str): Donor sequence to insert
-            donor_metadata: Metadata for the donor
+            donor_attrs: Attributes for the donor
 
         Returns:
             SequenceNode: Root node after insertion
@@ -521,10 +523,10 @@ class SequenceNode:
         # Fast path: Position is before this node
         if abs_position <= left_length:
             if self.left:
-                self.left = self.left.insert_recursive(abs_position, donor_seq, donor_metadata)
+                self.left = self.left.insert_recursive(abs_position, donor_seq, donor_attrs)
             else:
                 # Insert as left child
-                self.left = SequenceNode(donor_seq, True, donor_metadata)
+                self.left = SequenceNode(donor_seq, True, donor_attrs)
             self.__update_total_length()
             self.__update_height()
             return self.__balance()
@@ -537,29 +539,29 @@ class SequenceNode:
         if node_start < abs_position < node_end:
             # Split this node
             rel_pos = abs_position - node_start
-            left_content = self.content[:rel_pos]
-            right_content = self.content[rel_pos:]
+            left_data = self.data[:rel_pos]
+            right_data = self.data[rel_pos:]
             
-            # Handle TSD generation if requested in metadata
-            tsd_length = donor_metadata.get("tsd_length", 0) if donor_metadata else 0
+            # Handle TSD generation if requested in attributes
+            tsd_length = donor_attrs.get("tsd_length", 0)
             if tsd_length > 0:
                 # Extract source TSD sequence from the original sequence
-                # We extract from the right side of the split point (beginning of right_content)
-                source_tsd_seq = right_content[:min(tsd_length, len(right_content))]
+                # We extract from the right side of the split point (beginning of right_data)
+                source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
                 
                 # Generate TSD sequences (potentially with mutations)
                 tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
                 
-                # Remove source TSD from right_content as it will be duplicated
+                # Remove source TSD from right_data as it will be duplicated
                 if len(source_tsd_seq) > 0:
-                    right_content = right_content[len(source_tsd_seq):]
+                    right_data = right_data[len(source_tsd_seq):]
                 
-                # Add TSD sequences to the left and right content
-                left_content = left_content + tsd_5
-                right_content = tsd_3 + right_content
+                # Add TSD sequences to the left and right data
+                left_data = left_data + tsd_5
+                right_data = tsd_3 + right_data
             
-            # Create new left child with left content
-            new_left = SequenceNode(left_content, self.is_donor, self.metadata)
+            # Create new left child with left data
+            new_left = SequenceNode(left_data, self.is_donor, self.attributes)
             if self.left:
                 new_left.left = self.left
                 new_left.__update_total_length()
@@ -567,8 +569,8 @@ class SequenceNode:
                 # Ensure left subtree is balanced
                 new_left = new_left.__balance()
 
-            # Create new right child with right content and original right child
-            new_right = SequenceNode(right_content, self.is_donor, self.metadata)
+            # Create new right child with right data and original right child
+            new_right = SequenceNode(right_data, self.is_donor, self.attributes)
             if self.right:
                 new_right.right = self.right
                 new_right.__update_total_length()
@@ -576,11 +578,11 @@ class SequenceNode:
                 # Ensure right subtree is balanced
                 new_right = new_right.__balance()
 
-            # Replace this node's content with the donor
-            self.content = donor_seq
+            # Replace this node's data with the donor sequence
+            self.data = donor_seq
             self.length = len(donor_seq)
             self.is_donor = True
-            self.metadata = donor_metadata
+            self.attributes = donor_attrs
 
             # Set new children
             self.left = new_left
@@ -593,28 +595,28 @@ class SequenceNode:
         # Fast path: Position is after this node
         if abs_position >= node_end:
             if self.right:
-                self.right = self.right.insert_recursive(abs_position - node_end, donor_seq, donor_metadata)
+                self.right = self.right.insert_recursive(abs_position - node_end, donor_seq, donor_attrs)
             else:
                 # Insert as right child
-                self.right = SequenceNode(donor_seq, True, donor_metadata)
+                self.right = SequenceNode(donor_seq, True, donor_attrs)
             self.__update_total_length()
             self.__update_height()
             return self.__balance()
 
         raise RuntimeError("[ERROR] Should not reach here")
 
-    def collect_content_in_order_traversal(self):
+    def collect_data_in_order_traversal(self):
         """
-        Helper method to collect node content in in-order traversal.
+        Helper method to collect node data in in-order traversal.
         """
         result = []
         if self.left:
-            result.extend(self.left.collect_content_in_order_traversal())
+            result.extend(self.left.collect_data_in_order_traversal())
 
-        result.append(self.content)
+        result.append(self.data)
 
         if self.right:
-            result.extend(self.right.collect_content_in_order_traversal())
+            result.extend(self.right.collect_data_in_order_traversal())
 
         return result
 
@@ -645,7 +647,7 @@ class SequenceNode:
             start_index = current_position
             end_index = start_index + self.length
             donor_id = f"{seq_id}_{start_index}_{end_index}-+-{self.length}"
-            donor_record = create_sequence_record(self.content, donor_id)
+            donor_record = create_sequence_record(self.data, donor_id)
             donor_records.append(donor_record)
 
         right_length = 0
@@ -1070,11 +1072,11 @@ class SeqGenerator:
         
         # Insert donors directly into the tree in optimal order
         for pos, donor_seq in zip(insert_positions, selected_donors):
-            metadata = {"tsd_length": self.tsd_length} if self.tsd_length else {}
+            attributes = {"tsd_length": self.tsd_length} if self.tsd_length else {}
             if self.flag_recursive:
-                root = root.insert_recursive(pos, donor_seq, metadata)
+                root = root.insert_recursive(pos, donor_seq, attributes)
             else:
-                root = root.insert(pos, donor_seq, metadata)
+                root = root.insert(pos, donor_seq, attributes)
         
         # Generate final sequence
         final_seq = str(root)
@@ -1085,7 +1087,7 @@ class SeqGenerator:
         
         # Generate graphviz visualization if requested
         if self.flag_visual:
-            graphviz_str = root.to_graphviz(node_id_prefix=seq_record.id)
+            graphviz_str = root.to_graphviz_dot(node_id_prefix=seq_record.id)
             visual_dir_path = os.path.join(self.output_dir_path, TREE_VISUAL_DIR_NAME)
             os.makedirs(visual_dir_path, exist_ok=True)
             visual_file_path = os.path.join(visual_dir_path, f"{seq_record.id}_tree_visual.dot")
