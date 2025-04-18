@@ -954,10 +954,10 @@ class SequenceTree:
                 fill_color = "yellow"
 
         # Create node label with position information
-        label = "".join([node_type, " | ", node.uid, "\\n",
-                         start_pos, "\\l",
-                         end_pos, "\\l",
-                         "Length: ", node.length, "\\n",
+        label = "".join([node_type, " | ", str(node.uid), "\\n",
+                         str(start_pos), "\\l",
+                         str(end_pos), "\\l",
+                         "Length: ", str(node.length), "\\n",
                          additional_info])
 
         # Add the node to the nodes list
@@ -1433,77 +1433,66 @@ class SeqGenerator:
             Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]]]: 
                 The processed sequence, used donors, and reconstructed donors if tracking
         """
-        try:
-            # If idx_or_record is an integer, retrieve the sequence record
-            # If it's already a SeqRecord, use it directly
-            if isinstance(idx_or_record, int):
-                # Set random seed for multiprocessing
-                random.seed(os.getpid() + int(time.time()))
-                seq_record = self.input[idx_or_record]
+        # If idx_or_record is an integer, retrieve the sequence record
+        # If it's already a SeqRecord, use it directly
+        if isinstance(idx_or_record, int):
+            # Set random seed for multiprocessing
+            random.seed(os.getpid() + int(time.time()))
+            seq_record = self.input[idx_or_record]
+        else:
+            seq_record = idx_or_record
+
+        # Check if there are donor sequences to insert
+        if not self.insertion or not self.donor_sequences:
+            # If no insertions requested or no donor sequences available,
+            # return the original sequence with modified ID
+            # May be useful for future random sequence generation function
+            new_id = f"{seq_record.id}_ins0"
+            return create_sequence_record(str(seq_record.seq), new_id), None, None
+
+        # Create a new sequence tree for this sequence
+        seq_tree = SequenceTree(str(seq_record.seq), 0)
+
+        # Get the current total sequence length
+        total_length = len(str(seq_record.seq))
+
+        # Generate insertion positions and donor sequences
+        insert_positions = random.choices(range(total_length + 1), k=self.insertion)
+        selected_donors = random.choices(self.donor_sequences, weights=self.donor_weights, k=self.insertion)
+
+        # Sort positions in descending order to maintain position integrity during insertion
+        insert_positions, selected_donors = sort_multiple_lists(insert_positions, selected_donors, reverse=True)
+
+        # Insert donors into the tree
+        for pos, donor_seq in zip(insert_positions, selected_donors):
+            attrs = {"tsd_length": self.tsd_length} if self.tsd_length else {}
+            if self.flag_recursive:
+                seq_tree.insert_recursive(pos, donor_seq, attrs)
             else:
-                seq_record = idx_or_record
+                seq_tree.insert(pos, donor_seq, attrs)
 
-            # Check if there are donor sequences to insert
-            if not self.insertion or not self.donor_sequences:
-                # If no insertions requested or no donor sequences available,
-                # return the original sequence with modified ID
-                # May be useful for future random sequence generation function
-                new_id = f"{seq_record.id}_ins0"
-                return create_sequence_record(str(seq_record.seq), new_id), None, None
+        # Generate final sequence
+        new_id = f"{seq_record.id}_ins{self.insertion}"
+        if self.tsd_length:
+            new_id += f"_tsd{self.tsd_length}"
+        new_seq_record = create_sequence_record(str(seq_tree), new_id)
 
-            # Create a new sequence tree for this sequence
-            seq_tree = SequenceTree(str(seq_record.seq), 0)
+        # Generate visualization if requested
+        if self.flag_visual:
+            graphviz_str = seq_tree.to_graphviz_dot(node_id_prefix=seq_record.id)
+            visual_dir_path = os.path.join(self.output_dir_path, TREE_VISUAL_DIR_NAME)
+            os.makedirs(visual_dir_path, exist_ok=True)
+            with open(os.path.join(visual_dir_path, f"{seq_record.id}_tree_visual.dot"), "w") as f:
+                f.write(graphviz_str)
+            print(f"Generated tree visualization for {seq_record.id}")
 
-            # Get the current total sequence length
-            total_length = len(str(seq_record.seq))
+        # Collect donor sequences if tracking is enabled
+        used_donors = None
+        reconstructed_donors = None
+        if self.flag_track:
+            used_donors, reconstructed_donors = seq_tree.collect_donors(seq_record.id)
 
-            # Generate insertion positions and donor sequences
-            insert_positions = random.choices(range(total_length + 1), k=self.insertion)
-            selected_donors = random.choices(self.donor_sequences, weights=self.donor_weights, k=self.insertion)
-
-            # Sort positions in descending order to maintain position integrity during insertion
-            insert_positions, selected_donors = sort_multiple_lists(insert_positions, selected_donors, reverse=True)
-
-            # Insert donors into the tree
-            for pos, donor_seq in zip(insert_positions, selected_donors):
-                attrs = {"tsd_length": self.tsd_length} if self.tsd_length else {}
-                if self.flag_recursive:
-                    seq_tree.insert_recursive(pos, donor_seq, attrs)
-                else:
-                    seq_tree.insert(pos, donor_seq, attrs)
-
-            # Generate final sequence
-            new_id = f"{seq_record.id}_ins{self.insertion}"
-            if self.tsd_length:
-                new_id += f"_tsd{self.tsd_length}"
-            new_seq_record = create_sequence_record(str(seq_tree), new_id)
-
-            # Generate visualization if requested
-            if self.flag_visual:
-                try:
-                    graphviz_str = seq_tree.to_graphviz_dot(node_id_prefix=seq_record.id)
-                    visual_dir_path = os.path.join(self.output_dir_path, TREE_VISUAL_DIR_NAME)
-                    os.makedirs(visual_dir_path, exist_ok=True)
-                    with open(os.path.join(visual_dir_path, f"{seq_record.id}_tree_visual.dot"), "w") as f:
-                        f.write(graphviz_str)
-                    print(f"Generated tree visualization for {seq_record.id}")
-                except Exception as e:
-                    print(f"Error generating visualization: {str(e)}")
-
-            # Collect donor sequences if tracking is enabled
-            used_donors = None
-            reconstructed_donors = None
-            if self.flag_track:
-                used_donors, reconstructed_donors = seq_tree.collect_donors(seq_record.id)
-
-            return new_seq_record, used_donors, reconstructed_donors
-
-        except Exception as e:
-            # Simple error handling
-            seq_id = idx_or_record if isinstance(idx_or_record, int) else getattr(idx_or_record, 'id', 'unknown')
-            print(f"Error processing sequence {seq_id}: {str(e)}")
-            error_seq = create_sequence_record("N", f"error_processing_seq_{seq_id}")
-            return error_seq, None, None
+        return new_seq_record, used_donors, reconstructed_donors
 
     def execute(self):
         """
