@@ -13,7 +13,7 @@ import os
 import argparse
 import random
 import re
-from typing import Tuple, List, Dict, Iterable, Sequence, Union, Optional, Callable, Set, Any
+from typing import Tuple, List, Dict, Iterable, Sequence, Union, Optional, Callable
 import multiprocessing as mp
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -21,7 +21,8 @@ from Bio.SeqRecord import SeqRecord
 import time
 
 VERSION = "v1.0.0"
-INFO = ("by Tianyu (Sky) Lu (tianyu@lu.fm) released under GPLv3")
+INFO = ("by Tianyu (Sky) Lu (tianyu@lu.fm) "
+        "released under GPLv3")
 
 PROGRAM_ROOT_DIR_ABS_PATH = os.path.dirname(__file__)
 
@@ -37,7 +38,6 @@ DEFAULT_OUTPUT_DIR_ABS_PATH = os.path.join(os.getcwd(), DEFAULT_OUTPUT_DIR_REL_P
 
 # ======================================================================================================================
 # TSD (Target Site Duplication) Functions
-
 
 def add_snp_mutation(seq: str) -> str:
     """Add a single SNP mutation at a random position in the sequence.
@@ -85,7 +85,6 @@ def add_indel_mutation(seq: str) -> str:
         pos = random.randrange(len(seq))
         return seq[:pos] + seq[pos+1:]
 
-
 def generate_TSD(seq_slice: str,
                  length: int = float("inf"),
                  snp: float = DEFAULT_TSD_SNP_MUTATION_RATE,
@@ -121,9 +120,7 @@ def generate_TSD(seq_slice: str,
 
     return tsd_5, tsd_3
 
-
 # ======================================================================================================================
-
 
 class SequenceNode:
     """
@@ -162,7 +159,7 @@ class SequenceNode:
         """
         return "".join(self.collect_data_in_order_traversal())
 
-    def __update_total_length(self):
+    def update_total_length(self):
         """
         Update the total length of this subtree.
 
@@ -173,7 +170,7 @@ class SequenceNode:
         right_length = self.right.total_length if self.right else 0
         self.total_length = left_length + self.length + right_length
 
-    def __update_height(self):
+    def update_height(self):
         """
         Update the height of this node.
         """
@@ -181,7 +178,7 @@ class SequenceNode:
         right_height = self.right.height if self.right else 0
         self.height = max(left_height, right_height) + 1
 
-    def __get_balance(self):
+    def get_balance(self):
         """
         Calculate the balance factor of this node.
 
@@ -192,7 +189,7 @@ class SequenceNode:
         right_height = self.right.height if self.right else 0
         return left_height - right_height
 
-    def __rotate_right(self):
+    def rotate_right(self):
         """
         Perform a right rotation on this node.
 
@@ -201,22 +198,22 @@ class SequenceNode:
         """
         # Store the left child as the new root
         new_root = self.left
-        
+
         # The left child's right subtree becomes this node's left subtree
         self.left = new_root.right
-        
+
         # This node becomes the new root's right child
         new_root.right = self
-        
+
         # Update heights and total lengths
-        self.__update_height()
-        self.__update_total_length()
-        new_root.__update_height()
-        new_root.__update_total_length()
-        
+        self.update_height()
+        self.update_total_length()
+        new_root.update_height()
+        new_root.update_total_length()
+
         return new_root
 
-    def __rotate_left(self):
+    def rotate_left(self):
         """
         Perform a left rotation on this node.
 
@@ -225,22 +222,22 @@ class SequenceNode:
         """
         # Store the right child as the new root
         new_root = self.right
-        
+
         # The right child's left subtree becomes this node's right subtree
         self.right = new_root.left
-        
+
         # This node becomes the new root's left child
         new_root.left = self
-        
+
         # Update heights and total lengths
-        self.__update_height()
-        self.__update_total_length()
-        new_root.__update_height()
-        new_root.__update_total_length()
-        
+        self.update_height()
+        self.update_total_length()
+        new_root.update_height()
+        new_root.update_total_length()
+
         return new_root
 
-    def __balance(self):
+    def balance(self):
         """
         Balance this node if needed.
 
@@ -248,38 +245,38 @@ class SequenceNode:
             SequenceNode: The new root after balancing
         """
         # Update height
-        self.__update_height()
-        
+        self.update_height()
+
         # Get balance factor
-        balance = self.__get_balance()
-        
+        balance = self.get_balance()
+
         # Left-Left case
         if balance > 1 and (self.left and self.__get_left_balance() >= 0):
-            return self.__rotate_right()
-        
+            return self.rotate_right()
+
         # Left-Right case
         if balance > 1 and (self.left and self.__get_left_balance() < 0):
-            self.left = self.left.__rotate_left()
-            return self.__rotate_right()
-        
+            self.left = self.left.rotate_left()
+            return self.rotate_right()
+
         # Right-Right case
         if balance < -1 and (self.right and self.__get_right_balance() <= 0):
-            return self.__rotate_left()
-        
+            return self.rotate_left()
+
         # Right-Left case
         if balance < -1 and (self.right and self.__get_right_balance() > 0):
-            self.right = self.right.__rotate_right()
-            return self.__rotate_left()
-        
+            self.right = self.right.rotate_right()
+            return self.rotate_left()
+
         return self
 
     def __get_left_balance(self):
         """Get balance factor of left child"""
-        return self.left.__get_balance() if self.left else 0
-    
+        return self.left.get_balance() if self.left else 0
+
     def __get_right_balance(self):
         """Get balance factor of right child"""
-        return self.right.__get_balance() if self.right else 0
+        return self.right.get_balance() if self.right else 0
 
     def collect_data_in_order_traversal(self):
         """
@@ -305,7 +302,7 @@ class SequenceTree:
     def __init__(self, initial_seq: str, base_uid: int = 0):
         """
         Initialize a new sequence tree with a root node containing the initial sequence.
-        
+
         Args:
             initial_seq (str): The initial sequence to store in the root node
             base_uid (int): Base UID for this tree's UID management system
@@ -314,37 +311,43 @@ class SequenceTree:
         self.next_uid = base_uid
         self.available_uids = []
         self.node_dict = {}
-        
+
         # Create the root node
         self.root = self._create_node(initial_seq, False)
-    
+
+    def __str__(self) -> str:
+        """
+        Convert the tree to a string.
+
+        Returns:
+            str: The concatenated sequence
+        """
+        return str(self.root) if self.root else ""
+
     def _get_next_uid(self) -> int:
         """Get the next available UID from the UID management system"""
         if self.available_uids:
             return self.available_uids.pop(0)
+
         uid = self.next_uid
         self.next_uid += 1
         return uid
-    
+
     def _release_uid(self, uid: int):
         """Release an UID back to the UID management system"""
         if uid in self.node_dict:
             del self.node_dict[uid]
-            
-        if uid != self.next_uid - 1:
-            self.available_uids.append(uid)
-        else:
-            self.next_uid -= 1
-    
+        self.available_uids.append(uid)
+
     def _create_node(self, data: str, is_donor: bool = False, attrs: dict = None) -> SequenceNode:
         """
         Create a new SequenceNode with a unique UID.
-        
+
         Args:
             data (str): Sequence data
             is_donor (bool): Whether this node contains a donor sequence
             attrs (dict): Additional attributes
-            
+
         Returns:
             SequenceNode: The newly created node
         """
@@ -352,41 +355,41 @@ class SequenceTree:
         node = SequenceNode(data, is_donor, attrs, uid)
         self.node_dict[uid] = node
         return node
-    
+
     def insert(self, abs_position: int, donor_seq: str, donor_attrs: dict) -> None:
         """
         Insert a donor sequence at the specified position.
-        
+
         Args:
             abs_position (int): Absolute position for insertion
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
         """
         self.root = self._insert_iterative(self.root, abs_position, donor_seq, donor_attrs)
-    
+
     def _insert_iterative(self, node: SequenceNode, abs_position: int, donor_seq: str, donor_attrs: dict) -> SequenceNode:
         """
         Iteratively insert a donor sequence at the absolute position in the tree.
-        
+
         Args:
             node (SequenceNode): Current root node
             abs_position (int): Absolute position in the tree to insert at
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
-            
+
         Returns:
             SequenceNode: New root node after insertion
         """
         current = node
         parent_stack = []
         path_directions = []  # Record the path direction from root to current node ('left' or 'right')
-        
+
         # Iteratively find insertion position
         while True:
             left_length = current.left.total_length if current.left else 0
             node_start = left_length
             node_end = node_start + current.length
-            
+
             # Case 1: Position is in the current node's left subtree
             if abs_position <= left_length:
                 if current.left:
@@ -400,36 +403,36 @@ class SequenceTree:
                     # Use _update_node helper method instead of directly calling private methods
                     self._update_node(current)
                     break
-            
+
             # Case 2: Position is inside the current node
             elif node_start < abs_position < node_end:
                 # Calculate relative position
                 rel_pos = abs_position - node_start
                 left_data = current.data[:rel_pos]
                 right_data = current.data[rel_pos:]
-                
+
                 # Handle TSD generation
                 tsd_length = donor_attrs.get("tsd_length", 0)
                 if tsd_length > 0:
                     # Extract source TSD sequence from the original sequence
                     source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
-                    
+
                     # Generate TSD sequences (potentially with mutations)
                     tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
-                    
+
                     # Remove source TSD from right_data as it will be duplicated
                     if len(source_tsd_seq) > 0:
                         right_data = right_data[len(source_tsd_seq):]
-                    
+
                     # Add TSD sequences to the left and right data
                     left_data = left_data + tsd_5
                     right_data = tsd_3 + right_data
-                
+
                 # Get current node attributes
                 current_attrs = current.attrs.copy()
                 current_is_donor = current.is_donor
                 current_uid = current.uid
-                
+
                 # Create new left child with left data
                 new_left = self._create_node(left_data, current_is_donor, current_attrs.copy())
                 if current.left:
@@ -443,32 +446,32 @@ class SequenceTree:
                     new_right.right = current.right
                     # Use _update_node helper method
                     self._update_node(new_right)
-                
+
                 # Record nested insertion relationships
                 if current_is_donor:
                     # Record that the donor was cut
                     # Define the half attribute (left or right)
                     new_left.attrs["half"] = ["L"] if "half" not in new_left.attrs else new_left.attrs["half"] + ["L"]
                     new_right.attrs["half"] = ["R"] if "half" not in new_right.attrs else new_right.attrs["half"] + ["R"]
-                    
+
                     # Prepare donor attrs to record that it's nested inside this donor
                     donor_attrs_copy = donor_attrs.copy()
                     if "nested_in" not in donor_attrs_copy:
                         donor_attrs_copy["nested_in"] = []
                     donor_attrs_copy["nested_in"].append(current_uid)
-                    
+
                     # Record which donor cut this node
                     if "cut_by" not in new_left.attrs:
                         new_left.attrs["cut_by"] = []
                     if "cut_by" not in new_right.attrs:
                         new_right.attrs["cut_by"] = []
-                    
+
                     # Create a new donor node and get its UID
                     new_donor_uid = self._get_next_uid()
-                    
+
                     new_left.attrs["cut_by"].append(new_donor_uid)
                     new_right.attrs["cut_by"].append(new_donor_uid)
-                    
+
                     # Release current node's UID and set new values
                     self._release_uid(current.uid)
                     current.data = donor_seq
@@ -508,58 +511,58 @@ class SequenceTree:
                     break
             else:
                 raise RuntimeError("[ERROR] Should not reach here")
-        
+
         # Backtrack and update node heights and total lengths while executing balance
         while parent_stack:
             parent = parent_stack.pop()
             direction = path_directions.pop()
-            
+
             # Update parent node's child reference
             if direction == 'left':
                 # Balance current node using helper method
-                current = self._balance_node(current)
+                current = current.balance()
                 parent.left = current
             else:  # 'right'
                 # Balance current node using helper method
-                current = self._balance_node(current)
+                current = current.balance()
                 parent.right = current
-            
+
             # Update parent node
             self._update_node(parent)
-            
+
             # Balance parent node
-            current = self._balance_node(parent)
-        
-        return current if not parent_stack else self._balance_node(node)
-    
+            current = parent.balance()
+
+        return current if not parent_stack else node.balance()
+
     def insert_recursive(self, abs_position: int, donor_seq: str, donor_attrs: dict) -> None:
         """
         Recursively insert a donor sequence at the specified position.
-        
+
         Args:
             abs_position (int): Absolute position for insertion
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
         """
         self.root = self._insert_recursive(self.root, abs_position, donor_seq, donor_attrs)
-    
+
     def _insert_recursive(self, node: SequenceNode, abs_position: int, donor_seq: str, donor_attrs: dict) -> SequenceNode:
         """
         Recursively insert a donor sequence at the absolute position in the tree.
-        
+
         Args:
             node (SequenceNode): Current node
             abs_position (int): Absolute position in the tree to insert at
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
-            
+
         Returns:
             SequenceNode: New node after insertion
         """
         # Calculate positions in tree
         left_length = node.left.total_length if node.left else 0
 
-        # Fast path: Position is before this node
+        # Case 1: Position is in the current node's left subtree
         if abs_position <= left_length:
             if node.left:
                 node.left = self._insert_recursive(node.left, abs_position, donor_seq, donor_attrs)
@@ -568,42 +571,40 @@ class SequenceTree:
                 node.left = self._create_node(donor_seq, True, donor_attrs)
             # Use _update_node helper method
             self._update_node(node)
-            return self._balance_node(node)
+            return node.balance()
 
-        # Position is within this node
+        # Case 2: Position is inside the current node
         node_start = left_length
         node_end = node_start + node.length
-
-        # Fast path: Position is within this node
         if node_start < abs_position < node_end:
             # Split this node
             rel_pos = abs_position - node_start
             left_data = node.data[:rel_pos]
             right_data = node.data[rel_pos:]
-            
+
             # Handle TSD generation if requested in attributes
             tsd_length = donor_attrs.get("tsd_length", 0)
             if tsd_length > 0:
                 # Extract source TSD sequence from the original sequence
                 # We extract from the right side of the split point (beginning of right_data)
                 source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
-                
+
                 # Generate TSD sequences (potentially with mutations)
                 tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
-                
+
                 # Remove source TSD from right_data as it will be duplicated
                 if len(source_tsd_seq) > 0:
                     right_data = right_data[len(source_tsd_seq):]
-                
+
                 # Add TSD sequences to the left and right data
                 left_data = left_data + tsd_5
                 right_data = tsd_3 + right_data
-            
+
             # Get current node attributes
             current_attrs = node.attrs.copy()
             current_is_donor = node.is_donor
             current_uid = node.uid
-            
+
             # Create new left child with left data
             new_left = self._create_node(left_data, current_is_donor, current_attrs.copy())
             if node.left:
@@ -611,7 +612,7 @@ class SequenceTree:
                 # Use _update_node helper method
                 self._update_node(new_left)
                 # Balance left subtree
-                new_left = self._balance_node(new_left)
+                new_left = new_left.balance()
 
             # Create new right child with right data and original right child
             new_right = self._create_node(right_data, current_is_donor, current_attrs.copy())
@@ -620,7 +621,7 @@ class SequenceTree:
                 # Use _update_node helper method
                 self._update_node(new_right)
                 # Balance right subtree
-                new_right = self._balance_node(new_right)
+                new_right = new_right.balance()
 
             # Record nested insertion relationships
             if current_is_donor:
@@ -628,25 +629,25 @@ class SequenceTree:
                 # Define the half attribute (left or right)
                 new_left.attrs["half"] = ["L"] if "half" not in new_left.attrs else new_left.attrs["half"] + ["L"]
                 new_right.attrs["half"] = ["R"] if "half" not in new_right.attrs else new_right.attrs["half"] + ["R"]
-                
+
                 # Prepare donor attrs to record that it's nested inside this donor
                 donor_attrs_copy = donor_attrs.copy()
                 if "nested_in" not in donor_attrs_copy:
                     donor_attrs_copy["nested_in"] = []
                 donor_attrs_copy["nested_in"].append(current_uid)
-                
+
                 # Record which donor cut this node
                 if "cut_by" not in new_left.attrs:
                     new_left.attrs["cut_by"] = []
                 if "cut_by" not in new_right.attrs:
                     new_right.attrs["cut_by"] = []
-                
+
                 # Create a new donor node and get its UID
                 new_donor_uid = self._get_next_uid()
-                
+
                 new_left.attrs["cut_by"].append(new_donor_uid)
                 new_right.attrs["cut_by"].append(new_donor_uid)
-                
+
                 # Release current node's UID and set new values
                 self._release_uid(node.uid)
                 node.data = donor_seq
@@ -668,9 +669,9 @@ class SequenceTree:
             # Use _update_node helper method
             self._update_node(node)
 
-            return self._balance_node(node)
+            return node.balance()
 
-        # Fast path: Position is after this node
+        # Case 3: Position is in the current node's right subtree
         if abs_position >= node_end:
             if node.right:
                 node.right = self._insert_recursive(node.right, abs_position - node_end, donor_seq, donor_attrs)
@@ -679,17 +680,17 @@ class SequenceTree:
                 node.right = self._create_node(donor_seq, True, donor_attrs)
             # Use _update_node helper method
             self._update_node(node)
-            return self._balance_node(node)
+            return node.balance()
 
         raise RuntimeError("[ERROR] Should not reach here")
-    
+
     def collect_donors(self, seq_id: str) -> Tuple[List[SeqRecord], List[SeqRecord]]:
         """
         Collect all donor nodes and reconstruct nested donors.
-        
+
         Args:
             seq_id (str): ID of the original sequence
-            
+
         Returns:
             Tuple[List[SeqRecord], List[SeqRecord]]: 
                 - Regular donor records
@@ -697,28 +698,28 @@ class SequenceTree:
         """
         donor_records, _ = self._collect_donors(self.root, seq_id)
         reconstructed_donors = self._reconstruct_donors(donor_records, seq_id)
-        
+
         # Ensure we return two lists, even if reconstructed_donors is None
         if reconstructed_donors is None:
             reconstructed_donors = []
-            
+
         return donor_records, reconstructed_donors
-    
+
     def _collect_donors(self, node: SequenceNode, seq_id: str, abs_position: int = 0) -> Tuple[List[SeqRecord], int]:
         """
         Recursively collect donor nodes from the tree.
-        
+
         Args:
             node (SequenceNode): Current node
             seq_id (str): ID of the original sequence
             abs_position (int): Current absolute position
-            
+
         Returns:
             Tuple[List[SeqRecord], int]: Donor records and total length
         """
         if not node:
             return [], 0
-            
+
         donor_records = []
 
         # Process left subtree
@@ -731,24 +732,24 @@ class SequenceTree:
             # Create a donor record with absolute position
             start_index = current_position
             end_index = start_index + node.length
-            
+
             # Add information about nesting in the ID
             nested_info = ""
             if "nested_in" in node.attrs and node.attrs["nested_in"]:
                 nested_info = f"-nested_in_{'_'.join(map(str, node.attrs['nested_in']))}"
-            
+
             donor_id = f"{seq_id}_{start_index}_{end_index}-+-{node.length}{nested_info}"
             donor_record = create_sequence_record(node.data, donor_id)
-            
+
             # Add the node's UID and other attributes as annotations
             donor_record.annotations["uid"] = node.uid
-            
+
             if "cut_by" in node.attrs and node.attrs["cut_by"]:
                 donor_record.annotations["cut_by"] = node.attrs["cut_by"]
-            
+
             if "half" in node.attrs and node.attrs["half"]:
                 donor_record.annotations["half"] = node.attrs["half"]
-            
+
             donor_records.append(donor_record)
 
         # Process right subtree
@@ -757,15 +758,16 @@ class SequenceTree:
 
         # Return all donors and total length
         return donor_records, left_length + node.length + right_length
-    
-    def _reconstruct_donors(self, donor_records: List[SeqRecord], seq_id: str) -> List[SeqRecord]:
+
+    @staticmethod
+    def _reconstruct_donors(donor_records: List[SeqRecord], seq_id: str) -> List[SeqRecord]:
         """
         Reconstruct nested donors from collected donor records.
-        
+
         Args:
             donor_records (List[SeqRecord]): Collected donor records
             seq_id (str): ID of the original sequence
-            
+
         Returns:
             List[SeqRecord]: Reconstructed donor records
         """
@@ -774,7 +776,7 @@ class SequenceTree:
         for record in donor_records:
             if "uid" in record.annotations:
                 donor_dict[record.annotations["uid"]] = record
-        
+
         # Create an index to efficiently find matching halves
         half_index = {}
         for record in donor_records:
@@ -782,58 +784,58 @@ class SequenceTree:
                 "cut_by" not in record.annotations or 
                 "half" not in record.annotations):
                 continue
-            
+
             uid = record.annotations["uid"]
             cut_by_list = record.annotations["cut_by"]
             half_list = record.annotations["half"]
-            
+
             # Ensure cut_by_list and half_list have matching lengths
             if len(cut_by_list) != len(half_list):
                 print(f"Warning: Record {record.id} has mismatched cut_by and half lists, skipping")
                 continue
-            
+
             # Build index for each cutting relationship
             for cut_by_uid, half in zip(cut_by_list, half_list):
                 key = (cut_by_uid, half)
                 if key not in half_index:
                     half_index[key] = []
                 half_index[key].append(uid)
-        
+
         # Reconstruct cut donors
         reconstructed_donors = []
         processed_uids = set()
-        
+
         for record in donor_records:
             if ("uid" not in record.annotations or 
                 "cut_by" not in record.annotations or 
                 "half" not in record.annotations or 
                 record.annotations["uid"] in processed_uids):
                 continue
-            
+
             uid = record.annotations["uid"]
             cut_by_list = record.annotations["cut_by"]
             half_list = record.annotations["half"]
-            
+
             # Ensure cut_by_list and half_list have matching lengths
             if len(cut_by_list) != len(half_list):
                 continue  # Already checked above
-            
+
             # Process each cutting relationship
             for cut_by_uid, half in zip(cut_by_list, half_list):
                 # Use the index to quickly find matching halves
                 opposite_half = "R" if half == "L" else "L"
                 opposite_key = (cut_by_uid, opposite_half)
-                
+
                 if opposite_key in half_index and half_index[opposite_key]:
                     # Found matching halves
                     for matching_uid in half_index[opposite_key]:
                         if matching_uid in processed_uids or matching_uid == uid:
                             continue
-                        
+
                         matching_record = donor_dict.get(matching_uid)
                         if not matching_record:
                             continue
-                        
+
                         # Get cutting donor
                         cutting_donor = donor_dict.get(cut_by_uid)
                         if cutting_donor:
@@ -842,11 +844,11 @@ class SequenceTree:
                             # If cutting donor is missing, mark it
                             cutting_seq = "[MISSING_CUTTING_DONOR]"
                             print(f"Warning: Could not find cutting donor with UID {cut_by_uid}")
-                        
+
                         # Determine which half is left and which is right
                         left_record = record if half == "L" else matching_record
                         right_record = matching_record if half == "L" else record
-                        
+
                         # Create reconstructed donor sequence (with cutting donor)
                         reconstructed_seq = ""
                         # First add the left fragment
@@ -855,45 +857,45 @@ class SequenceTree:
                         reconstructed_seq += cutting_seq
                         # Add the right fragment
                         reconstructed_seq += str(right_record.seq)
-                        
+
                         # Create record for the reconstructed donor
                         rec_id = f"{seq_id}_reconstructed_cut_donor_{uid}_{cut_by_uid}"
                         rec_record = create_sequence_record(reconstructed_seq, rec_id)
                         rec_record.annotations["original_fragments"] = [uid, matching_uid]
                         rec_record.annotations["cutting_donor"] = cut_by_uid
-                        
+
                         reconstructed_donors.append(rec_record)
-                        
+
                         # Also create a clean reconstructed donor (without cutting donor)
                         clean_reconstructed_seq = str(left_record.seq) + str(right_record.seq)
                         clean_rec_id = f"{seq_id}_clean_reconstructed_donor_{uid}_{cut_by_uid}"
                         clean_rec_record = create_sequence_record(clean_reconstructed_seq, clean_rec_id)
                         clean_rec_record.annotations["original_fragments"] = [uid, matching_uid]
-                        
+
                         reconstructed_donors.append(clean_rec_record)
-                        
+
                         # Mark both fragments as processed
                         processed_uids.add(uid)
                         processed_uids.add(matching_uid)
-                        
+
                         # Successfully found a match, proceed to next record
                         break
-        
+
         return reconstructed_donors
-    
+
     def to_graphviz_dot(self, node_id_prefix: str = "node") -> str:
         """
         Generate a Graphviz DOT representation of the tree structure for visualization.
-        
+
         Args:
             node_id_prefix (str): Prefix for node IDs in the graph
-            
+
         Returns:
             str: Graphviz DOT format string
         """
         if not self.root:
             return "digraph SequenceTree { }"
-            
+
         # Initialize the DOT string with graph declaration
         dot_str = ["digraph SequenceTree {",
                    "  bgcolor=\"#FFF\"",
@@ -902,54 +904,65 @@ class SequenceTree:
 
         # Generate nodes and edges through recursive traversal
         nodes, edges = self._build_graphviz_dot_nodes_edges(self.root, node_id_prefix)
-        
+
         # Add all nodes and edges to the DOT string
         for node in nodes:
             dot_str.append(f"  {node}")
         for edge in edges:
             dot_str.append(f"  {edge}")
-        
+
         dot_str.append('}')
         return '\n'.join(dot_str)
-    
+
     def _build_graphviz_dot_nodes_edges(self, node: SequenceNode, node_id_prefix: str, abs_pos: int = 0) -> tuple:
         """
         Recursively build nodes and edges for Graphviz visualization.
-        
+
         Args:
             node (SequenceNode): Current node
             node_id_prefix (str): Prefix for node IDs
             abs_pos (int): Current absolute position
-            
+
         Returns:
             tuple: (nodes list, edges list)
         """
         if not node:
             return [], []
-            
+
         nodes = []
         edges = []
-        
+
         # Calculate positions
         left_length = node.left.total_length if node.left else 0
-        
+
         # Calculate start and end positions
         start_pos = abs_pos + left_length
         end_pos = start_pos + node.length
-        
+
         # Generate unique ID for this node
         node_id = f"{node_id_prefix}_{start_pos}_{end_pos}"
-        
+
         # Determine node type and color
         node_type = "Donor" if node.is_donor else "Acceptor"
         fill_color = "lightblue" if node.is_donor else "lightgreen"
-        
+        nest_cut = node.attrs.get("nested_in", []) or node.attrs.get("half", []) or []
+        additional_info = ','.join(nest_cut) if nest_cut else ""
+        if nest_cut:
+            if {"L", "R"} & set(nest_cut):  # node is cut by cutting donor
+                fill_color = "lightpink"
+            else:
+                fill_color = "yellow"
+
         # Create node label with position information
-        label = f"{node_type}\\nStart: {start_pos}\\nEnd: {end_pos}\\nLength: {node.length}"
-        
+        label = "".join([node_type, " | ", node.uid, "\\n",
+                         start_pos, "\\l",
+                         end_pos, "\\l",
+                         "Length: ", node.length, "\\n",
+                         additional_info])
+
         # Add the node to the nodes list
         nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
-        
+
         # Process left child if exists
         if node.left:
             # Left child should start at the same absolute position as its parent
@@ -959,7 +972,7 @@ class SequenceTree:
             )
             nodes.extend(left_nodes)
             edges.extend(left_edges)
-            
+
             # Get the first node ID from left nodes (should be the root of left subtree)
             # If it's empty (unlikely), create a placeholder ID
             left_id = None
@@ -969,16 +982,16 @@ class SequenceTree:
                 if match:
                     left_id = match.group(1)
                     break
-            
+
             # If we couldn't find a proper ID, create one based on our knowledge of the left child
             if not left_id:
                 left_start = left_abs_pos + (node.left.left.total_length if node.left.left else 0)
                 left_end = left_start + node.left.length
                 left_id = f"{node_id_prefix}_L_{left_start}_{left_end}"
-            
+
             # Add edge from this node to left child
             edges.append(f'{node_id} -> {left_id} [label="L"];')
-        
+
         # Process right child if exists
         if node.right:
             # Right child starts at the end position of the current node
@@ -988,7 +1001,7 @@ class SequenceTree:
             )
             nodes.extend(right_nodes)
             edges.extend(right_edges)
-            
+
             # Get the first node ID from right nodes (should be the root of right subtree)
             # If it's empty (unlikely), create a placeholder ID
             right_id = None
@@ -998,57 +1011,31 @@ class SequenceTree:
                 if match:
                     right_id = match.group(1)
                     break
-            
+
             # If we couldn't find a proper ID, create one based on our knowledge of the right child
             if not right_id:
                 right_start = right_abs_pos + (node.right.left.total_length if node.right.left else 0)
                 right_end = right_start + node.right.length
                 right_id = f"{node_id_prefix}_R_{right_start}_{right_end}"
-            
+
             # Add edge from this node to right child
             edges.append(f'{node_id} -> {right_id} [label="R"];')
-        
-        return nodes, edges
-    
-    def __str__(self) -> str:
-        """
-        Convert the tree to a string.
-        
-        Returns:
-            str: The concatenated sequence
-        """
-        return str(self.root) if self.root else ""
 
-    def _update_node(self, node: SequenceNode) -> None:
+        return nodes, edges
+
+    @staticmethod
+    def _update_node(node: SequenceNode) -> None:
         """
         Helper method to update a node's height and total length.
         Correctly calls the node's internal methods.
-        
+
         Args:
             node (SequenceNode): The node to update
         """
-        # The methods with double underscore are "private" to SequenceNode
-        # We need to call them indirectly
-        node._SequenceNode__update_height()
-        node._SequenceNode__update_total_length()
-    
-    def _balance_node(self, node: SequenceNode) -> SequenceNode:
-        """
-        Helper method to balance a node.
-        Correctly calls the node's internal balance method.
-        
-        Args:
-            node (SequenceNode): The node to balance
-            
-        Returns:
-            SequenceNode: The balanced node (may be a different node than input)
-        """
-        # Call the private balance method of SequenceNode
-        return node._SequenceNode__balance()
-
+        node.update_height()
+        node.update_total_length()
 
 # ======================================================================================================================
-
 
 def convert_humanized_number(text: str, base: Union[float, int], units: Sequence[Union[str, Iterable[str]]]) -> float:
     """
@@ -1106,58 +1093,10 @@ def convert_humanized_number(text: str, base: Union[float, int], units: Sequence
 
     return number * (base ** unit_index)
 
-
 def convert_humanized_int(number: Union[str, int]) -> int:
     if isinstance(number, int):
         return number
     return int(convert_humanized_number(number, 1000, ("", 'K', 'M', 'B', 'T')))
-
-
-#
-# def convert_humanized_int(number: Union[str, int]) -> int:
-#     """
-#     Process a number string to return the integer.
-#
-#     This function converts various number formats (plain number, k, m) into
-#     the actual integer.
-#
-#     Args:
-#         number (Union[str, int]): Should be a string specifying number:
-#             - A plain number (e.g., "100")
-#             - Kilo with 'k' suffix (e.g., "1k")
-#             - Mega with 'm' suffix (e.g., "1m")
-#             If the number is an integer, it will be returned as is.
-#
-#     Returns:
-#         int: The integer represented by the number string.
-#
-#     Raises:
-#         ValueError: If the number string format is invalid.
-#
-#     Examples:
-#         >>> convert_humanized_int("100")
-#         100
-#         >>> convert_humanized_int("1k")
-#         1000
-#         >>> convert_humanized_int("1m")
-#         1000000
-#     """
-#     if isinstance(number, int):
-#         return number
-#
-#     number = number.lower()
-#
-#     # Check for k/m suffix
-#     if number.endswith('k'):
-#         return int(float(number[:-1]) * 1000)
-#     elif number.endswith('m'):
-#         return int(float(number[:-1]) * 1000000)
-#
-#     # Check if pure number
-#     if number.isdigit():
-#         return int(number)
-#
-#     raise ValueError("[ERROR] Invalid format. Use plain number, k or m (e.g. 100, 1k, 1m)")
 
 
 def sort_multiple_lists(base: list, *lists: list,
@@ -1204,7 +1143,6 @@ def sort_multiple_lists(base: list, *lists: list,
 
     return tuple(sorted_lists)
 
-
 def create_sequence_record(seq: str, id: str) -> SeqRecord:
     """
     Create a BioPython SeqRecord object from a sequence string and ID.
@@ -1227,7 +1165,6 @@ def create_sequence_record(seq: str, id: str) -> SeqRecord:
     """
     return SeqRecord(Seq(seq), id=id, description="")
 
-
 def save_multi_fasta_from_dict(records_dict: Dict[str, List[SeqRecord]], output_dir_path: str):
     """
     Save multiple FASTA files from a dictionary of sequence records.
@@ -1238,13 +1175,12 @@ def save_multi_fasta_from_dict(records_dict: Dict[str, List[SeqRecord]], output_
     """
     if not records_dict:
         return
-        
+
     os.makedirs(output_dir_path, exist_ok=True)
     for file_name, records in records_dict.items():
         if records:  # Skip empty record lists
             output_file_path: str = os.path.join(output_dir_path, file_name)
             SeqIO.write(records, output_file_path, "fasta")
-
 
 def load_sequences(path_list: Optional[List[str]], len_limit: Optional[int] = None,
                    flag_filter_n: bool = False) -> Optional[List[str]]:
@@ -1272,7 +1208,6 @@ def load_sequences(path_list: Optional[List[str]], len_limit: Optional[int] = No
 
     donor_sequences.sort(key=len)
     return donor_sequences
-
 
 def _find_donor_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
     """
@@ -1326,13 +1261,12 @@ def _find_donor_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
         elif os.path.isdir(default_donor_lib_abs_path):
             donor_lib_files: List[str] = []
             for file in os.listdir(default_donor_lib_abs_path):
-                if file.endswith((".fa", ".fa")):
+                if file.endswith(".fa"):
                     donor_lib_files.append(os.path.join(default_donor_lib_abs_path, file))
             if donor_lib_files:
                 return donor_lib_files
 
     raise SystemExit(f"[ERROR] Specified donor library not found at {path} or built-in donor library!")
-
 
 def _load_multiple_donor_libs(path_list: List[str], weight_list: Optional[List[float]] = None,
                             len_limit: Optional[int] = None,
@@ -1380,7 +1314,6 @@ def _load_multiple_donor_libs(path_list: List[str], weight_list: Optional[List[f
 
     return all_donor_sequence_list, all_donor_len_list, all_donor_weight_list
 
-
 class SeqGenerator:
     def __init__(self, input_file: str, insertion: Union[str, int], batch: int, processors: int, output_dir_path: str,
                  donor_lib: Optional[List[str]] = None, donor_lib_weight: Optional[List[float]] = None,
@@ -1427,7 +1360,7 @@ class SeqGenerator:
         # Load donor sequences
         if not donor_lib:
             raise ValueError("Donor library is required for insertion. Please provide at least one donor library path using the --donor parameter.")
-        
+
         try:
             donor_lib_data = _load_multiple_donor_libs(donor_lib, donor_lib_weight, donor_len_limit, flag_filter_n)
             if not donor_lib_data or not donor_lib_data[0]:
@@ -1441,7 +1374,7 @@ class SeqGenerator:
         except Exception as e:
             # Convert any exception during donor loading to a more informative error
             raise ValueError(f"Error loading donor libraries: {str(e)}")
-            
+
     def __pre_check(self):
         """
         Perform pre-execution checks.
@@ -1454,28 +1387,28 @@ class SeqGenerator:
                                                                          Optional[List[SeqRecord]]]:
         """
         Process a batch of sequences using multiprocessing.
-        
+
         Args:
             total_sequences (int): Total number of sequences to process
-            
+
         Returns:
             Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[List[SeqRecord]]]: 
                 All processed sequences, donor records, and reconstructed donor records
         """
         if total_sequences == 0:
             return [], None, None
-            
+
         item_indices = list(range(total_sequences))
-        
+
         print(f"Using multiprocessing with {self.processors} worker processes to process {total_sequences} sequences")
-        
+
         all_sequences = []
         all_donors = [] if self.flag_track else None
         all_reconstructed_donors = [] if self.flag_track else None
-        
+
         with mp.Pool(self.processors) as pool:
             results = pool.map(self._process_single_sequence, item_indices)
-            
+
             for i, (processed_seq, donors, reconstructed) in enumerate(results, 1):
                 all_sequences.append(processed_seq)
                 if self.flag_track:
@@ -1483,54 +1416,19 @@ class SeqGenerator:
                         all_donors.extend(donors)
                     if reconstructed:
                         all_reconstructed_donors.extend(reconstructed)
-                
+
                 if i % 10 == 0 or i == total_sequences:
                     print(f"Completed {i}/{total_sequences} sequences")
-        
+
         return all_sequences, all_donors, all_reconstructed_donors
-        
-    def __process_batch_single_thread(self, total_sequences: int) -> Tuple[List[SeqRecord], 
-                                                                       Optional[List[SeqRecord]],
-                                                                       Optional[List[SeqRecord]]]:
-        """
-        Process a batch of sequences using a single thread.
-        
-        Args:
-            total_sequences (int): Total number of sequences to process
-            
-        Returns:
-            Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[List[SeqRecord]]]: 
-                All processed sequences, donor records, and reconstructed donor records
-        """
-        if total_sequences == 0:
-            return [], None, None
-            
-        all_sequences = []
-        all_donors = [] if self.flag_track else None
-        all_reconstructed_donors = [] if self.flag_track else None
-        
-        for i in range(total_sequences):
-            processed_seq, donors, reconstructed = self._process_single_sequence(i)
-            all_sequences.append(processed_seq)
-            
-            if self.flag_track:
-                if donors:
-                    all_donors.extend(donors)
-                if reconstructed:
-                    all_reconstructed_donors.extend(reconstructed)
-            
-            if (i + 1) % 10 == 0 or i + 1 == total_sequences:
-                print(f"Processed {i+1}/{total_sequences} sequences")
-        
-        return all_sequences, all_donors, all_reconstructed_donors
-        
+
     def _process_single_sequence(self, idx_or_record) -> Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]]]:
         """
         Process a single sequence with random insertions.
-        
+
         Args:
             idx_or_record: Either an index (int) to look up in self.input, or a SeqRecord to process directly
-            
+
         Returns:
             Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]]]: 
                 The processed sequence, used donors, and reconstructed donors if tracking
@@ -1544,7 +1442,7 @@ class SeqGenerator:
                 seq_record = self.input[idx_or_record]
             else:
                 seq_record = idx_or_record
-                
+
             # Check if there are donor sequences to insert
             if not self.insertion or not self.donor_sequences:
                 # If no insertions requested or no donor sequences available,
@@ -1552,20 +1450,20 @@ class SeqGenerator:
                 # May be useful for future random sequence generation function
                 new_id = f"{seq_record.id}_ins0"
                 return create_sequence_record(str(seq_record.seq), new_id), None, None
-                
+
             # Create a new sequence tree for this sequence
             seq_tree = SequenceTree(str(seq_record.seq), 0)
-            
+
             # Get the current total sequence length
             total_length = len(str(seq_record.seq))
-            
+
             # Generate insertion positions and donor sequences
             insert_positions = random.choices(range(total_length + 1), k=self.insertion)
             selected_donors = random.choices(self.donor_sequences, weights=self.donor_weights, k=self.insertion)
-            
+
             # Sort positions in descending order to maintain position integrity during insertion
             insert_positions, selected_donors = sort_multiple_lists(insert_positions, selected_donors, reverse=True)
-            
+
             # Insert donors into the tree
             for pos, donor_seq in zip(insert_positions, selected_donors):
                 attrs = {"tsd_length": self.tsd_length} if self.tsd_length else {}
@@ -1573,13 +1471,13 @@ class SeqGenerator:
                     seq_tree.insert_recursive(pos, donor_seq, attrs)
                 else:
                     seq_tree.insert(pos, donor_seq, attrs)
-            
+
             # Generate final sequence
             new_id = f"{seq_record.id}_ins{self.insertion}"
             if self.tsd_length:
                 new_id += f"_tsd{self.tsd_length}"
             new_seq_record = create_sequence_record(str(seq_tree), new_id)
-            
+
             # Generate visualization if requested
             if self.flag_visual:
                 try:
@@ -1591,35 +1489,35 @@ class SeqGenerator:
                     print(f"Generated tree visualization for {seq_record.id}")
                 except Exception as e:
                     print(f"Error generating visualization: {str(e)}")
-            
+
             # Collect donor sequences if tracking is enabled
             used_donors = None
             reconstructed_donors = None
             if self.flag_track:
                 used_donors, reconstructed_donors = seq_tree.collect_donors(seq_record.id)
-            
+
             return new_seq_record, used_donors, reconstructed_donors
-            
+
         except Exception as e:
             # Simple error handling
             seq_id = idx_or_record if isinstance(idx_or_record, int) else getattr(idx_or_record, 'id', 'unknown')
             print(f"Error processing sequence {seq_id}: {str(e)}")
             error_seq = create_sequence_record("N", f"error_processing_seq_{seq_id}")
             return error_seq, None, None
-            
+
     def execute(self):
         """
         Execute the sequence generation process.
         """
         self.__print_header()
-        
+
         start_time = time.time()
         self.__pre_check()
-        
+
         # Process each batch
         for batch_num in range(1, self.batch + 1):
             self.__process_single_batch(batch_num)
-        
+
         # Print summary
         total_elapsed_time = time.time() - start_time
         self.__print_summary(total_elapsed_time)
@@ -1644,7 +1542,7 @@ class SeqGenerator:
     def __print_summary(self, total_elapsed_time: float):
         """
         Print a summary of the processing results.
-        
+
         Args:
             total_elapsed_time (float): Total time taken for all batches
         """
@@ -1654,37 +1552,34 @@ class SeqGenerator:
     def __process_single_batch(self, batch_num: int) -> float:
         """
         Process a single batch of sequences.
-        
+
         Args:
             batch_num (int): Batch number (starting from 1)
-            
+
         Returns:
             float: Time taken to process this batch (seconds)
         """
         batch_start_time = time.time()
-        
+
         # Set random seed for this batch
         random.seed(int(time.time()) + batch_num)
-        
+
         print(f"\nProcessing batch {batch_num}/{self.batch}")
-        
+
         total_sequences = len(self.input)
-        
+
         # Choose processing method
-        if self.processors > 1 and total_sequences > 1:
-            all_sequences, all_donors, all_reconstructed_donors = self.__process_batch_multiprocessing(total_sequences)
-        else:
-            all_sequences, all_donors, all_reconstructed_donors = self.__process_batch_single_thread(total_sequences)
-        
+        all_sequences, all_donors, all_reconstructed_donors = self.__process_batch_multiprocessing(total_sequences)
+
         os.makedirs(self.output_dir_path, exist_ok=True)
         print(f"Output directory: {self.output_dir_path}")
 
         # Save results
         self.__save_batch_results(self.output_dir_path, all_sequences, all_donors, all_reconstructed_donors, batch_num)
-        
+
         batch_elapsed_time = time.time() - batch_start_time
         print(f"Batch {batch_num} completed in {batch_elapsed_time:.2g} seconds")
-        
+
         return batch_elapsed_time
 
     def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], 
@@ -1693,7 +1588,7 @@ class SeqGenerator:
                              batch_num: int = 1):
         """
         Save the batch results to output files.
-        
+
         Args:
             output_dir (str): Directory to save the results
             sequences (List[SeqRecord]): List of sequence records to save
@@ -1704,30 +1599,30 @@ class SeqGenerator:
         if not sequences:
             print("No sequences to save")
             return
-            
+
         # Add batch suffix to filenames if multiple batches
         suffix = f"_batch{batch_num}" if self.batch > 1 else ""
-        
+
         print(f"Saving {len(sequences)} processed sequences")
         output_dict = {f"sequences{suffix}.fa": sequences}
-        
+
         if self.flag_track and donors:
             print(f"Saving {len(donors)} donor sequence records")
             output_dict[f"used_donors{suffix}.fa"] = donors
-            
+
             if reconstructed_donors:
                 # Group by reconstruction type
                 full_recs = [d for d in reconstructed_donors if "reconstructed_cut_donor" in d.id]
                 clean_recs = [d for d in reconstructed_donors if "clean_reconstructed_donor" in d.id]
-                
+
                 if full_recs:
                     print(f"Saving {len(full_recs)} full reconstructed donor records")
                     output_dict[f"reconstructed_donors{suffix}.fa"] = full_recs
-                
+
                 if clean_recs:
                     print(f"Saving {len(clean_recs)} clean reconstructed donor records")
                     output_dict[f"cut_donors{suffix}.fa"] = clean_recs
-        
+
         save_multi_fasta_from_dict(output_dict, output_dir)
 
 def main():
