@@ -5,6 +5,8 @@ Random Sequence Insertion Generator
 This program takes acceptor sequences and performs random insertions using sequences
 from a donor library. It supports multiprocessing for efficient sequence generation.
 
+Note: This program uses 1-based indexing for all sequence positions (both input and output).
+
 Author: Tianyu Lu (tianyu@lu.fm)
 Date: 2024-11-27
 """
@@ -361,11 +363,13 @@ class SequenceTree:
         Insert a donor sequence at the specified position.
 
         Args:
-            abs_position (int): Absolute position for insertion
+            abs_position (int): Absolute position for insertion (1-based)
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
         """
-        self.root = self._insert_iterative(self.root, abs_position, donor_seq, donor_attrs)
+        # Convert 1-based position to 0-based for internal processing
+        zero_based_position = abs_position - 1
+        self.root = self._insert_iterative(self.root, zero_based_position, donor_seq, donor_attrs)
 
     def _insert_iterative(self, node: SequenceNode, abs_position: int, donor_seq: str, donor_attrs: dict) -> SequenceNode:
         """
@@ -373,7 +377,7 @@ class SequenceTree:
 
         Args:
             node (SequenceNode): Current root node
-            abs_position (int): Absolute position in the tree to insert at
+            abs_position (int): Absolute position in the tree to insert at (0-based)
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
 
@@ -540,11 +544,13 @@ class SequenceTree:
         Recursively insert a donor sequence at the specified position.
 
         Args:
-            abs_position (int): Absolute position for insertion
+            abs_position (int): Absolute position for insertion (1-based)
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
         """
-        self.root = self._insert_recursive(self.root, abs_position, donor_seq, donor_attrs)
+        # Convert 1-based position to 0-based for internal processing
+        zero_based_position = abs_position - 1
+        self.root = self._insert_recursive(self.root, zero_based_position, donor_seq, donor_attrs)
 
     def _insert_recursive(self, node: SequenceNode, abs_position: int, donor_seq: str, donor_attrs: dict) -> SequenceNode:
         """
@@ -552,7 +558,7 @@ class SequenceTree:
 
         Args:
             node (SequenceNode): Current node
-            abs_position (int): Absolute position in the tree to insert at
+            abs_position (int): Absolute position in the tree to insert at (0-based)
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
 
@@ -712,7 +718,7 @@ class SequenceTree:
         Args:
             node (SequenceNode): Current node
             seq_id (str): ID of the original sequence
-            abs_position (int): Current absolute position
+            abs_position (int): Current absolute position (0-based)
 
         Returns:
             Tuple[List[SeqRecord], int]: Donor records and total length
@@ -733,12 +739,16 @@ class SequenceTree:
             start_index = current_position
             end_index = start_index + node.length
 
+            # Convert 0-based indices to 1-based for output
+            start_index_1based = start_index + 1
+            end_index_1based = end_index
+
             # Add information about nesting in the ID
             nested_info = ""
             if "nested_in" in node.attrs and node.attrs["nested_in"]:
                 nested_info = f"-nested_in_{'_'.join(map(str, node.attrs['nested_in']))}"
 
-            donor_id = f"{seq_id}_{start_index}_{end_index}-+-{node.length}{nested_info}"
+            donor_id = f"{seq_id}_{start_index_1based}_{end_index_1based}-+-{node.length}{nested_info}"
             donor_record = create_sequence_record(node.data, donor_id)
 
             # Add the node's UID and other attributes as annotations
@@ -921,7 +931,7 @@ class SequenceTree:
         Args:
             node (SequenceNode): Current node
             node_id_prefix (str): Prefix for node IDs
-            abs_pos (int): Current absolute position
+            abs_pos (int): Current absolute position (0-based)
 
         Returns:
             tuple: (nodes list, edges list)
@@ -939,6 +949,10 @@ class SequenceTree:
         start_pos = abs_pos + left_length
         end_pos = start_pos + node.length
 
+        # Convert to 1-based positions for display
+        start_pos_1based = start_pos + 1
+        end_pos_1based = end_pos
+
         # Generate unique ID for this node
         node_id = f"{node_id_prefix}_{start_pos}_{end_pos}"
 
@@ -955,8 +969,8 @@ class SequenceTree:
 
         # Create node label with position information
         label = "".join([node_type, " | ", str(node.uid), "\\n",
-                         str(start_pos), "\\l",
-                         str(end_pos), "\\l",
+                         str(start_pos_1based), "\\l",
+                         str(end_pos_1based), "\\l",
                          "Length: ", str(node.length), "\\n",
                          additional_info])
 
@@ -1457,7 +1471,8 @@ class SeqGenerator:
         total_length = len(str(seq_record.seq))
 
         # Generate insertion positions and donor sequences
-        insert_positions = random.choices(range(total_length + 1), k=self.insertion)
+        # Use 1-based positions (1 to total_length+1)
+        insert_positions = random.choices(range(1, total_length + 2), k=self.insertion)
         selected_donors = random.choices(self.donor_sequences, weights=self.donor_weights, k=self.insertion)
 
         # Sort positions in descending order to maintain position integrity during insertion
