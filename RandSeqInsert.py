@@ -976,30 +976,27 @@ class SequenceTree:
         fill_color = "lightblue" if node.is_donor else "lightgreen"
         
         # Process nesting and cutting information
-        additional_info = ""
-        
-        # Process nested_in information (tuple format)
+        nested_in = ""
+        cut_half = ""
+
         if "nested_in" in node.attrs and node.attrs["nested_in"]:
-            nested_pairs = []
-            for pair in node.attrs["nested_in"]:
-                l_uid, r_uid = pair
-                nested_pairs.append(f"{l_uid}_{r_uid}")
-            
-            if nested_pairs:
-                additional_info += f"Nested_in: {', '.join(nested_pairs)}\\n"
-                fill_color = "yellow"  # Nested nodes shown in yellow
-        
-        # Process half information (cut nodes)
+            nested_in = "Nest: " + ','.join(map(str, node.attrs["nested_in"])).replace(' ', "") + "\\n"
+            fill_color = "yellow"  # Nested nodes shown in yellow
+
         if "half" in node.attrs and node.attrs["half"]:
-            additional_info += f"Cut_half: {', '.join(node.attrs['half'])}\\n"
+            cut_half = "Cut: " + ','.join(node.attrs["half"]) + "\\n"
             fill_color = "lightpink"  # Cut nodes shown in pink
+
+        if nested_in and cut_half:
+            fill_color = "plum"
 
         # Create node label with position information
         label = "".join([node_type, " | ", str(node.uid), "\\n",
                          str(start_pos_1based), "\\l",
                          str(end_pos_1based), "\\l",
                          "Length: ", str(node.length), "\\n",
-                         additional_info])
+                         nested_in,
+                         cut_half])
 
         # Add the node to the nodes list
         nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
