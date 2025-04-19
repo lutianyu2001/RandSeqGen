@@ -339,7 +339,7 @@ class SequenceTree:
         """Release an UID back to the UID management system"""
         if uid in self.node_dict:
             del self.node_dict[uid]
-        self.available_uids.append(uid)
+            self.available_uids.append(uid)
 
     def _create_node(self, data: str, is_donor: bool = False, attrs: dict = None) -> SequenceNode:
         """
@@ -462,7 +462,8 @@ class SequenceTree:
                     donor_attrs_copy = donor_attrs.copy()
                     if "nested_in" not in donor_attrs_copy:
                         donor_attrs_copy["nested_in"] = []
-                    donor_attrs_copy["nested_in"].append(current_uid)
+                    # Store L and R node UIDs
+                    donor_attrs_copy["nested_in"].append((new_left.uid, new_right.uid))
 
                     # Record which donor cut this node
                     if "cut_by" not in new_left.attrs:
@@ -477,6 +478,7 @@ class SequenceTree:
                     new_right.attrs["cut_by"].append(new_donor_uid)
 
                     # Release current node's UID and set new values
+                    old_uid = current.uid
                     self._release_uid(current.uid)
                     current.data = donor_seq
                     current.length = len(donor_seq)
@@ -484,6 +486,9 @@ class SequenceTree:
                     current.attrs = donor_attrs_copy
                     current.uid = new_donor_uid
                     self.node_dict[new_donor_uid] = current
+                    
+                    # Update all references to the old UID
+                    self._update_uid_references(old_uid, new_donor_uid)
                 else:
                     # Replace current node's data with the donor sequence
                     current.data = donor_seq
@@ -640,7 +645,8 @@ class SequenceTree:
                 donor_attrs_copy = donor_attrs.copy()
                 if "nested_in" not in donor_attrs_copy:
                     donor_attrs_copy["nested_in"] = []
-                donor_attrs_copy["nested_in"].append(current_uid)
+                # Store L and R node UIDs
+                donor_attrs_copy["nested_in"].append((new_left.uid, new_right.uid))
 
                 # Record which donor cut this node
                 if "cut_by" not in new_left.attrs:
@@ -655,6 +661,7 @@ class SequenceTree:
                 new_right.attrs["cut_by"].append(new_donor_uid)
 
                 # Release current node's UID and set new values
+                old_uid = node.uid
                 self._release_uid(node.uid)
                 node.data = donor_seq
                 node.length = len(donor_seq)
@@ -662,6 +669,9 @@ class SequenceTree:
                 node.attrs = donor_attrs_copy
                 node.uid = new_donor_uid
                 self.node_dict[new_donor_uid] = node
+                
+                # Update all references to the old UID
+                self._update_uid_references(old_uid, new_donor_uid)
             else:
                 # Replace this node's data with the donor sequence
                 node.data = donor_seq
@@ -746,8 +756,13 @@ class SequenceTree:
             # Add information about nesting in the ID
             nested_info = ""
             if "nested_in" in node.attrs and node.attrs["nested_in"]:
-                nested_info = f"-nested_in_{'_'.join(map(str, node.attrs['nested_in']))}"
-
+                # Process tuple format
+                nested_pairs = []
+                for pair in node.attrs["nested_in"]:
+                    l_uid, r_uid = pair
+                    nested_pairs.append(f"{l_uid}_{r_uid}")
+                nested_info = f"-nested_in_{'_'.join(nested_pairs)}"
+            
             donor_id = f"{seq_id}_{start_index_1based}_{end_index_1based}-+-{node.length}{nested_info}"
             donor_record = create_sequence_record(node.data, donor_id)
 
@@ -959,15 +974,25 @@ class SequenceTree:
         # Determine node type and color
         node_type = "Donor" if node.is_donor else "Acceptor"
         fill_color = "lightblue" if node.is_donor else "lightgreen"
-        nest_cut = list(map(str, node.attrs.get("nested_in", []) or node.attrs.get("half", []) or []))
-        additional_info = ','.join(nest_cut) if nest_cut else ""
-        if nest_cut:
-            if {"L", "R"} & set(nest_cut):  # node is cut by cutting donor
-                fill_color = "lightpink"
-                additional_info = "Cut: " + additional_info
-            else:
-                fill_color = "yellow"
-                additional_info = "Nest: " + additional_info
+        
+        # Process nesting and cutting information
+        additional_info = ""
+        
+        # Process nested_in information (tuple format)
+        if "nested_in" in node.attrs and node.attrs["nested_in"]:
+            nested_pairs = []
+            for pair in node.attrs["nested_in"]:
+                l_uid, r_uid = pair
+                nested_pairs.append(f"{l_uid}_{r_uid}")
+            
+            if nested_pairs:
+                additional_info += f"Nested_in: {', '.join(nested_pairs)}\\n"
+                fill_color = "yellow"  # Nested nodes shown in yellow
+        
+        # Process half information (cut nodes)
+        if "half" in node.attrs and node.attrs["half"]:
+            additional_info += f"Cut_half: {', '.join(node.attrs['half'])}\\n"
+            fill_color = "lightpink"  # Cut nodes shown in pink
 
         # Create node label with position information
         label = "".join([node_type, " | ", str(node.uid), "\\n",
@@ -1020,6 +1045,42 @@ class SequenceTree:
         """
         node.update_height()
         node.update_total_length()
+
+    def _update_uid_references(self, old_uid: int, new_uid: int) -> None:
+        """
+        Update all references to old_uid with new_uid in the entire tree.
+        
+        This method scans through all nodes in the tree and updates any references
+        to old_uid in cut_by and nested_in attributes with new_uid.
+        
+        Args:
+            old_uid (int): The old UID being replaced
+            new_uid (int): The new UID to use instead
+        """
+        # Skip if old_uid and new_uid are the same
+        if old_uid == new_uid:
+            return
+            
+        # Iterate through all nodes in the tree
+        for node_uid, node in self.node_dict.items():
+            # Update cut_by references
+            if "cut_by" in node.attrs and node.attrs["cut_by"]:
+                for i, cut_uid in enumerate(node.attrs["cut_by"]):
+                    if cut_uid == old_uid:
+                        node.attrs["cut_by"][i] = new_uid
+            
+            # Update nested_in references (tuple format)
+            if "nested_in" in node.attrs and node.attrs["nested_in"]:
+                updated_nested_in = []
+                for nested_pair in node.attrs["nested_in"]:
+                    # Handle tuple format (L_uid, R_uid)
+                    l_uid, r_uid = nested_pair
+                    if l_uid == old_uid:
+                        l_uid = new_uid
+                    if r_uid == old_uid:
+                        r_uid = new_uid
+                    updated_nested_in.append((l_uid, r_uid))
+                node.attrs["nested_in"] = updated_nested_in
 
 # ======================================================================================================================
 
