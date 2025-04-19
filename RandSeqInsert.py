@@ -1332,7 +1332,8 @@ class SeqGenerator:
     def __init__(self, input_file: str, insertion: Union[str, int], batch: int, processors: int, output_dir_path: str,
                  donor_lib: Optional[List[str]] = None, donor_lib_weight: Optional[List[float]] = None,
                  donor_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
-                 tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False):
+                 tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False,
+                 iteration: int = 1):
         """
         Initialize the sequence generator.
 
@@ -1350,6 +1351,7 @@ class SeqGenerator:
             tsd_length (int, optional): Length of Target Site Duplication (TSD) to generate
             flag_visual (bool): Whether to generate graphviz visualization of the sequence tree
             flag_recursive (bool): Whether to use recursive insertion method
+            iteration (int): Number of insertion iterations to perform on each sequence
         """
         self.input_file: str = input_file
         self.insertion: int = convert_humanized_int(insertion)
@@ -1362,6 +1364,7 @@ class SeqGenerator:
         self.tsd_length: Optional[int] = tsd_length
         self.flag_visual: bool = flag_visual
         self.flag_recursive: bool = flag_recursive
+        self.iteration: int = iteration
 
         # Load input sequence
         try:
@@ -1396,22 +1399,20 @@ class SeqGenerator:
         if not os.path.exists(self.output_dir_path):
             os.makedirs(self.output_dir_path)
 
-    def __process_batch_multiprocessing(self, total_sequences: int) -> Tuple[List[SeqRecord], 
+    def __process_batch_multiprocessing(self) -> Tuple[List[SeqRecord], 
                                                                          Optional[List[SeqRecord]],
                                                                          Optional[List[SeqRecord]]]:
         """
         Process a batch of sequences using multiprocessing.
 
-        Args:
-            total_sequences (int): Total number of sequences to process
-
         Returns:
             Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[List[SeqRecord]]]: 
                 All processed sequences, donor records, and reconstructed donor records
         """
-        if total_sequences == 0:
+        if not self.input:
             return [], None, None
 
+        total_sequences = len(self.input)
         item_indices = list(range(total_sequences))
 
         print(f"Using multiprocessing with {self.processors} worker processes to process {total_sequences} sequences")
@@ -1438,7 +1439,7 @@ class SeqGenerator:
 
     def _process_single_sequence(self, idx_or_record) -> Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]]]:
         """
-        Process a single sequence with random insertions.
+        Process a single sequence with random insertions, potentially over multiple iterations.
 
         Args:
             idx_or_record: Either an index (int) to look up in self.input, or a SeqRecord to process directly
@@ -1447,11 +1448,12 @@ class SeqGenerator:
             Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]]]: 
                 The processed sequence, used donors, and reconstructed donors if tracking
         """
+        random.seed(os.getpid() + int(time.time()))
+        
         # If idx_or_record is an integer, retrieve the sequence record
         # If it's already a SeqRecord, use it directly
         if isinstance(idx_or_record, int):
             # Set random seed for multiprocessing
-            random.seed(os.getpid() + int(time.time()))
             seq_record = self.input[idx_or_record]
         else:
             seq_record = idx_or_record
@@ -1466,28 +1468,45 @@ class SeqGenerator:
 
         # Create a new sequence tree for this sequence
         seq_tree = SequenceTree(str(seq_record.seq), 0)
+        
+        # Track all used donors across iterations if tracking is enabled
+        all_used_donors = [] if self.flag_track else None
+        all_reconstructed_donors = [] if self.flag_track else None
+        
+        # Perform multiple iterations of insertion
+        for iteration in range(1, self.iteration + 1):
+            # Get the current total sequence length (updated after each iteration)
+            current_seq = str(seq_tree)
+            total_length = len(current_seq)
 
-        # Get the current total sequence length
-        total_length = len(str(seq_record.seq))
+            # Generate insertion positions and donor sequences
+            # Use 1-based positions (1 to total_length+1)
+            insert_positions = random.choices(range(1, total_length + 2), k=self.insertion)
+            selected_donors = random.choices(self.donor_sequences, weights=self.donor_weights, k=self.insertion)
 
-        # Generate insertion positions and donor sequences
-        # Use 1-based positions (1 to total_length+1)
-        insert_positions = random.choices(range(1, total_length + 2), k=self.insertion)
-        selected_donors = random.choices(self.donor_sequences, weights=self.donor_weights, k=self.insertion)
+            # Sort positions in descending order to maintain position integrity during insertion
+            insert_positions, selected_donors = sort_multiple_lists(insert_positions, selected_donors, reverse=True)
 
-        # Sort positions in descending order to maintain position integrity during insertion
-        insert_positions, selected_donors = sort_multiple_lists(insert_positions, selected_donors, reverse=True)
+            # Insert donors into the tree
+            for pos, donor_seq in zip(insert_positions, selected_donors):
+                attrs = {"tsd_length": self.tsd_length} if self.tsd_length else {}
+                if self.flag_recursive:
+                    seq_tree.insert_recursive(pos, donor_seq, attrs)
+                else:
+                    seq_tree.insert(pos, donor_seq, attrs)
 
-        # Insert donors into the tree
-        for pos, donor_seq in zip(insert_positions, selected_donors):
-            attrs = {"tsd_length": self.tsd_length} if self.tsd_length else {}
-            if self.flag_recursive:
-                seq_tree.insert_recursive(pos, donor_seq, attrs)
-            else:
-                seq_tree.insert(pos, donor_seq, attrs)
+            # Collect donor sequences for this iteration if tracking is enabled
+            if self.flag_track:
+                used_donors, reconstructed_donors = seq_tree.collect_donors(f"{seq_record.id}_iter{iteration}")
+                if used_donors:
+                    all_used_donors.extend(used_donors)
+                if reconstructed_donors:
+                    all_reconstructed_donors.extend(reconstructed_donors)
 
         # Generate final sequence
         new_id = f"{seq_record.id}_ins{self.insertion}"
+        if self.iteration > 1:
+            new_id += f"_iter{self.iteration}"
         if self.tsd_length:
             new_id += f"_tsd{self.tsd_length}"
         new_seq_record = create_sequence_record(str(seq_tree), new_id)
@@ -1501,13 +1520,7 @@ class SeqGenerator:
                 f.write(graphviz_str)
             print(f"Generated tree visualization for {seq_record.id}")
 
-        # Collect donor sequences if tracking is enabled
-        used_donors = None
-        reconstructed_donors = None
-        if self.flag_track:
-            used_donors, reconstructed_donors = seq_tree.collect_donors(seq_record.id)
-
-        return new_seq_record, used_donors, reconstructed_donors
+        return new_seq_record, all_used_donors, all_reconstructed_donors
 
     def execute(self):
         """
@@ -1534,6 +1547,8 @@ class SeqGenerator:
         print(f"Processing input file: {self.input_file}")
         print(f"Number of input sequences: {len(self.input)}")
         print(f"Insertion settings: {self.insertion} insertions per sequence")
+        if self.iteration > 1:
+            print(f"Performing {self.iteration} iterations of insertion")
         if self.tsd_length:
             print(f"TSD settings: Generating TSD of length {self.tsd_length} at insertion sites")
         print(f"Donor library: {len(self.donor_sequences)} sequences loaded")
@@ -1570,10 +1585,8 @@ class SeqGenerator:
 
         print(f"\nProcessing batch {batch_num}/{self.batch}")
 
-        total_sequences = len(self.input)
-
         # Choose processing method
-        all_sequences, all_donors, all_reconstructed_donors = self.__process_batch_multiprocessing(total_sequences)
+        all_sequences, all_donors, all_reconstructed_donors = self.__process_batch_multiprocessing()
 
         os.makedirs(self.output_dir_path, exist_ok=True)
         print(f"Output directory: {self.output_dir_path}")
@@ -1665,6 +1678,8 @@ def main():
                             help="Number of independent result files to generate. Runs the entire process multiple times with different random seeds to generate multiple output sets. Default: 1")
     ctrl_group.add_argument("-p", "--processors", type=int, default=DEFAULT_ALLOCATED_CPU_CORES, metavar="INT",
                        help=f"Number of processors to use for parallel processing. Default: {DEFAULT_ALLOCATED_CPU_CORES}")
+    ctrl_group.add_argument("-it", "--iteration", type=int, default=1, metavar="INT",
+                       help="Number of insertion iterations to perform on each sequence. Each iteration will use the sequence from the previous iteration as input. Default: 1")
 
     # Flags
     flag_group = parser.add_argument_group("Flags")
@@ -1694,7 +1709,8 @@ def main():
         flag_track=parsed_args.track,
         tsd_length=parsed_args.tsd,
         flag_visual=parsed_args.visual,
-        flag_recursive=parsed_args.recursive
+        flag_recursive=parsed_args.recursive,
+        iteration=parsed_args.iteration
     )
     generator.execute()
 
