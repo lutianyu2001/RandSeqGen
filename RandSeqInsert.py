@@ -930,7 +930,7 @@ class SequenceTree:
 
         Args:
             node (SequenceNode): Current node
-            node_id_prefix (str): Prefix for node IDs
+            node_id_prefix (str): Prefix for node IDs (not used when using uid as node ID)
             abs_pos (int): Current absolute position (0-based)
 
         Returns:
@@ -945,7 +945,7 @@ class SequenceTree:
         # Calculate positions
         left_length = node.left.total_length if node.left else 0
 
-        # Calculate start and end positions
+        # Calculate start and end positions for display
         start_pos = abs_pos + left_length
         end_pos = start_pos + node.length
 
@@ -953,8 +953,8 @@ class SequenceTree:
         start_pos_1based = start_pos + 1
         end_pos_1based = end_pos
 
-        # Generate unique ID for this node
-        node_id = f"{node_id_prefix}_{start_pos}_{end_pos}"
+        # Use uid directly as node ID
+        node_id = f"node_{node.uid}"
 
         # Determine node type and color
         node_type = "Donor" if node.is_donor else "Acceptor"
@@ -989,23 +989,8 @@ class SequenceTree:
             nodes.extend(left_nodes)
             edges.extend(left_edges)
 
-            # Get the first node ID from left nodes (should be the root of left subtree)
-            # If it's empty (unlikely), create a placeholder ID
-            left_id = None
-            for left_node in left_nodes:
-                # Extract node ID from the DOT node definition
-                match = re.match(r'([^\s\[]+)\s*\[', left_node)
-                if match:
-                    left_id = match.group(1)
-                    break
-
-            # If we couldn't find a proper ID, create one based on our knowledge of the left child
-            if not left_id:
-                left_start = left_abs_pos + (node.left.left.total_length if node.left.left else 0)
-                left_end = left_start + node.left.length
-                left_id = f"{node_id_prefix}_L_{left_start}_{left_end}"
-
-            # Add edge from this node to left child
+            # Add edge from this node to left child using uid
+            left_id = f"node_{node.left.uid}"
             edges.append(f'{node_id} -> {left_id} [label="L"];')
 
         # Process right child if exists
@@ -1018,23 +1003,8 @@ class SequenceTree:
             nodes.extend(right_nodes)
             edges.extend(right_edges)
 
-            # Get the first node ID from right nodes (should be the root of right subtree)
-            # If it's empty (unlikely), create a placeholder ID
-            right_id = None
-            for right_node in right_nodes:
-                # Extract node ID from the DOT node definition
-                match = re.match(r'([^\s\[]+)\s*\[', right_node)
-                if match:
-                    right_id = match.group(1)
-                    break
-
-            # If we couldn't find a proper ID, create one based on our knowledge of the right child
-            if not right_id:
-                right_start = right_abs_pos + (node.right.left.total_length if node.right.left else 0)
-                right_end = right_start + node.right.length
-                right_id = f"{node_id_prefix}_R_{right_start}_{right_end}"
-
-            # Add edge from this node to right child
+            # Add edge from this node to right child using uid
+            right_id = f"node_{node.right.uid}"
             edges.append(f'{node_id} -> {right_id} [label="R"];')
 
         return nodes, edges
