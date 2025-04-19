@@ -959,13 +959,15 @@ class SequenceTree:
         # Determine node type and color
         node_type = "Donor" if node.is_donor else "Acceptor"
         fill_color = "lightblue" if node.is_donor else "lightgreen"
-        nest_cut = node.attrs.get("nested_in", []) or node.attrs.get("half", []) or []
+        nest_cut = list(map(str, node.attrs.get("nested_in", []) or node.attrs.get("half", []) or []))
         additional_info = ','.join(nest_cut) if nest_cut else ""
         if nest_cut:
             if {"L", "R"} & set(nest_cut):  # node is cut by cutting donor
                 fill_color = "lightpink"
+                additional_info = "Cut: " + additional_info
             else:
                 fill_color = "yellow"
+                additional_info = "Nest: " + additional_info
 
         # Create node label with position information
         label = "".join([node_type, " | ", str(node.uid), "\\n",
@@ -1662,6 +1664,8 @@ def main():
     core_group.add_argument("-is", "--insert", metavar="INT/STR",
                        help="Number of insertions per sequence. Accepts either a plain number (e.g., 100) or a string with k/m suffix (e.g., 1k, 1m).",
                        type=str, required=True)
+    core_group.add_argument("-it", "--iteration", type=int, default=1, metavar="INT",
+                            help="Number of insertion iterations to perform on each sequence. Each iteration will use the sequence from the previous iteration as input. Default: 1")
 
     # Donor Library Arguments
     donor_group = parser.add_argument_group("Donor Library Arguments")
@@ -1678,8 +1682,6 @@ def main():
                             help="Number of independent result files to generate. Runs the entire process multiple times with different random seeds to generate multiple output sets. Default: 1")
     ctrl_group.add_argument("-p", "--processors", type=int, default=DEFAULT_ALLOCATED_CPU_CORES, metavar="INT",
                        help=f"Number of processors to use for parallel processing. Default: {DEFAULT_ALLOCATED_CPU_CORES}")
-    ctrl_group.add_argument("-it", "--iteration", type=int, default=1, metavar="INT",
-                       help="Number of insertion iterations to perform on each sequence. Each iteration will use the sequence from the previous iteration as input. Default: 1")
 
     # Flags
     flag_group = parser.add_argument_group("Flags")
