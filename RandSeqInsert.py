@@ -1528,13 +1528,11 @@ class SeqGenerator:
                 else:
                     seq_tree.insert(pos, donor_seq, attrs)
 
-            # Collect donor sequences for this iteration if tracking is enabled
-            if self.flag_track:
-                used_donors, reconstructed_donors = seq_tree.collect_donors(f"{seq_record.id}_iter{iteration}")
-                if used_donors:
-                    all_used_donors.extend(used_donors)
-                if reconstructed_donors:
-                    all_reconstructed_donors.extend(reconstructed_donors)
+        # Collect donor sequences once after all iterations if tracking is enabled
+        if self.flag_track:
+            used_donors, reconstructed_donors = seq_tree.collect_donors(seq_record.id)
+            all_used_donors = used_donors if used_donors else []
+            all_reconstructed_donors = reconstructed_donors if reconstructed_donors else []
 
         # Generate final sequence
         new_id = f"{seq_record.id}_ins{self.insertion}"
