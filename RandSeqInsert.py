@@ -607,7 +607,6 @@ class SequenceTree:
             # Get current node attributes
             current_attrs = node.attrs.copy()
             current_is_donor = node.is_donor
-            current_uid = node.uid
 
             # Create new left child with left data
             new_left = self._create_node(left_data, current_is_donor, current_attrs.copy())
