@@ -15,7 +15,7 @@ import os
 import argparse
 import random
 import re
-from typing import Tuple, List, Dict, Iterable, Sequence, Union, Optional, Callable
+from typing import Tuple, List, Dict, Iterable, Sequence, Union, Optional, Callable, Set
 import multiprocessing as mp
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -152,6 +152,23 @@ class SequenceNode:
         # Height of the node for AVL balancing
         self.height = 1
 
+    def __iter__(self):
+        """
+        实现对树的中序遍历，以左-根-右的顺序迭代所有节点
+        
+        Yields:
+            SequenceNode: 树中的每个节点
+        """
+        yield from SequenceNode._inorder_traversal(self)
+
+    @staticmethod
+    def _inorder_traversal(node):
+        if not node:
+            return
+        yield from SequenceNode._inorder_traversal(node.left)
+        yield node
+        yield from SequenceNode._inorder_traversal(node.right)
+
     def __str__(self) -> str:
         """
         Convert the tree to a string by in-order traversal.
@@ -159,7 +176,15 @@ class SequenceNode:
         Returns:
             str: The concatenated sequence
         """
-        return "".join(self.collect_data_in_order_traversal())
+        return "".join([node.data for node in self])
+
+    def update_height(self):
+        """
+        Update the height of this node.
+        """
+        left_height = self.left.height if self.left else 0
+        right_height = self.right.height if self.right else 0
+        self.height = max(left_height, right_height) + 1
 
     def update_total_length(self):
         """
@@ -172,13 +197,9 @@ class SequenceNode:
         right_length = self.right.total_length if self.right else 0
         self.total_length = left_length + self.length + right_length
 
-    def update_height(self):
-        """
-        Update the height of this node.
-        """
-        left_height = self.left.height if self.left else 0
-        right_height = self.right.height if self.right else 0
-        self.height = max(left_height, right_height) + 1
+    def update(self):
+        self.update_height()
+        self.update_total_length()
 
     def get_balance(self):
         """
@@ -207,12 +228,8 @@ class SequenceNode:
         # This node becomes the new root's right child
         new_root.right = self
 
-        # Update heights and total lengths
-        self.update_height()
-        self.update_total_length()
-        new_root.update_height()
-        new_root.update_total_length()
-
+        self.update()
+        new_root.update()
         return new_root
 
     def rotate_left(self):
@@ -231,12 +248,8 @@ class SequenceNode:
         # This node becomes the new root's left child
         new_root.left = self
 
-        # Update heights and total lengths
-        self.update_height()
-        self.update_total_length()
-        new_root.update_height()
-        new_root.update_total_length()
-
+        self.update()
+        new_root.update()
         return new_root
 
     def balance(self):
@@ -280,21 +293,6 @@ class SequenceNode:
         """Get balance factor of right child"""
         return self.right.get_balance() if self.right else 0
 
-    def collect_data_in_order_traversal(self):
-        """
-        Helper method to collect node data in in-order traversal.
-        """
-        result = []
-        if self.left:
-            result.extend(self.left.collect_data_in_order_traversal())
-
-        result.append(self.data)
-
-        if self.right:
-            result.extend(self.right.collect_data_in_order_traversal())
-
-        return result
-
 
 class SequenceTree:
     """
@@ -325,6 +323,9 @@ class SequenceTree:
             str: The concatenated sequence
         """
         return str(self.root) if self.root else ""
+
+    def __iter__(self):
+        yield from self.root
 
     def _get_next_uid(self) -> int:
         """Get the next available UID from the UID management system"""
@@ -700,24 +701,110 @@ class SequenceTree:
 
         raise RuntimeError("[ERROR] Should not reach here")
 
-    def collect_donors(self, seq_id: str) -> Tuple[List[SeqRecord], List[SeqRecord]]:
+    def build_nesting_graph(self):
+        """构建嵌套关系图"""
+        # 如果已有图，直接返回
+        if hasattr(self, '_nesting_graph') and self._nesting_graph.is_built:
+            return self._nesting_graph
+            
+        # 创建新图
+        self._nesting_graph = DonorNestingGraph()
+        
+        # 收集所有donor节点（不是记录）
+        donor_nodes = self._collect_donor_nodes()
+        
+        # 直接从节点构建图
+        self._build_graph_from_nodes(donor_nodes)
+        
+        # 标记图已构建
+        self._nesting_graph.is_built = True
+        
+        return self._nesting_graph
+        
+    def _collect_donor_nodes(self):
+        """收集树中所有donor节点
+        
+        Returns:
+            list: 所有donor节点列表
         """
-        Collect all donor nodes and reconstruct nested donors.
+        # 使用列表推导式筛选所有 is_donor=True 的节点
+        return [node for node in self if node.is_donor]
+        
+    def _build_graph_from_nodes(self, donor_nodes):
+        """从收集的donor节点直接构建图
+        
+        Args:
+            donor_nodes (list): 所有donor节点列表
+        """
+        # 首先添加所有节点
+        for node in donor_nodes:
+            self._nesting_graph.add_node(node.uid, node.data, node.attrs)
+        
+        # 处理所有节点的关系
+        for node in donor_nodes:
+            # 处理切割关系
+            if "cut_by" in node.attrs and "half" in node.attrs:
+                cut_by_list = node.attrs.get("cut_by", [])
+                half_list = node.attrs.get("half", [])
+                
+                for i, (cutting_uid, half) in enumerate(zip(cut_by_list, half_list)):
+                    # 查找匹配的另一半
+                    opposite_half = "R" if half == "L" else "L"
+                    
+                    # 查找所有被同一个donor切割且是另一半的节点
+                    for other_node in donor_nodes:
+                        if other_node.uid == node.uid:
+                            continue
+                            
+                        if "cut_by" not in other_node.attrs or "half" not in other_node.attrs:
+                            continue
+                            
+                        other_cut_by_list = other_node.attrs.get("cut_by", [])
+                        other_half_list = other_node.attrs.get("half", [])
+                        
+                        # 查找匹配的切割关系
+                        for j, (other_cutting_uid, other_half) in enumerate(zip(other_cut_by_list, other_half_list)):
+                            if other_cutting_uid == cutting_uid and other_half == opposite_half:
+                                # 找到匹配的一对，确定左右关系
+                                left_uid = node.uid if half == "L" else other_node.uid
+                                right_uid = other_node.uid if half == "L" else node.uid
+                                
+                                # 添加切割关系
+                                self._nesting_graph.add_cut_relation(cutting_uid, left_uid, right_uid)
+            
+            # 处理嵌套关系
+            if "nested_in" in node.attrs:
+                nested_pairs = node.attrs.get("nested_in", [])
+                for container_pair in nested_pairs:
+                    container_left_uid, container_right_uid = container_pair
+                    self._nesting_graph.add_nesting_relation(node.uid, container_left_uid, container_right_uid)
+
+    def donors(self, seq_id: str) -> Tuple[List[SeqRecord], List[SeqRecord]]:
+        """
+        收集所有donor节点并重建嵌套donor。
+        利用嵌套关系图执行高效重建。
 
         Args:
-            seq_id (str): ID of the original sequence
+            seq_id (str): 原始序列ID
 
         Returns:
             Tuple[List[SeqRecord], List[SeqRecord]]: 
-                - Regular donor records
-                - Reconstructed donor records
+                - 常规donor记录（不包括被重建donor覆盖的）
+                - 重建的donor记录
         """
+        # 收集donor记录
         donor_records, _ = self._collect_donors(self.root, seq_id)
-        reconstructed_donors = self._reconstruct_donors(donor_records, seq_id)
-
-        # Ensure we return two lists, even if reconstructed_donors is None
-        if reconstructed_donors is None:
-            reconstructed_donors = []
+        
+        # 构建嵌套关系图
+        nesting_graph = self.build_nesting_graph()
+        
+        # 使用图重建donor
+        reconstructed_donors, excluded_uids = nesting_graph.reconstruct_donors(seq_id)
+        
+        # 过滤掉被重建donor覆盖的记录
+        if excluded_uids:
+            donor_records = [record for record in donor_records 
+                             if record.annotations["uid"] not in excluded_uids]
 
         return donor_records, reconstructed_donors
 
@@ -783,130 +870,6 @@ class SequenceTree:
 
         # Return all donors and total length
         return donor_records, left_length + node.length + right_length
-
-    @staticmethod
-    def _reconstruct_donors(donor_records: List[SeqRecord], seq_id: str) -> List[SeqRecord]:
-        """
-        Reconstruct nested donors from collected donor records.
-
-        Args:
-            donor_records (List[SeqRecord]): Collected donor records
-            seq_id (str): ID of the original sequence
-
-        Returns:
-            List[SeqRecord]: Reconstructed donor records
-        """
-        # Create a dictionary to organize donors by their UID
-        donor_dict = {}
-        for record in donor_records:
-            if "uid" in record.annotations:
-                donor_dict[record.annotations["uid"]] = record
-
-        # Create an index to efficiently find matching halves
-        half_index = {}
-        for record in donor_records:
-            if ("uid" not in record.annotations or 
-                "cut_by" not in record.annotations or 
-                "half" not in record.annotations):
-                continue
-
-            uid = record.annotations["uid"]
-            cut_by_list = record.annotations["cut_by"]
-            half_list = record.annotations["half"]
-
-            # Ensure cut_by_list and half_list have matching lengths
-            if len(cut_by_list) != len(half_list):
-                print(f"Warning: Record {record.id} has mismatched cut_by and half lists, skipping")
-                continue
-
-            # Build index for each cutting relationship
-            for cut_by_uid, half in zip(cut_by_list, half_list):
-                key = (cut_by_uid, half)
-                if key not in half_index:
-                    half_index[key] = []
-                half_index[key].append(uid)
-
-        # Reconstruct cut donors
-        reconstructed_donors = []
-        processed_uids = set()
-
-        for record in donor_records:
-            if ("uid" not in record.annotations or 
-                "cut_by" not in record.annotations or 
-                "half" not in record.annotations or 
-                record.annotations["uid"] in processed_uids):
-                continue
-
-            uid = record.annotations["uid"]
-            cut_by_list = record.annotations["cut_by"]
-            half_list = record.annotations["half"]
-
-            # Ensure cut_by_list and half_list have matching lengths
-            if len(cut_by_list) != len(half_list):
-                continue  # Already checked above
-
-            # Process each cutting relationship
-            for cut_by_uid, half in zip(cut_by_list, half_list):
-                # Use the index to quickly find matching halves
-                opposite_half = "R" if half == "L" else "L"
-                opposite_key = (cut_by_uid, opposite_half)
-
-                if opposite_key in half_index and half_index[opposite_key]:
-                    # Found matching halves
-                    for matching_uid in half_index[opposite_key]:
-                        if matching_uid in processed_uids or matching_uid == uid:
-                            continue
-
-                        matching_record = donor_dict.get(matching_uid)
-                        if not matching_record:
-                            continue
-
-                        # Get cutting donor
-                        cutting_donor = donor_dict.get(cut_by_uid)
-                        if cutting_donor:
-                            cutting_seq = str(cutting_donor.seq)
-                        else:
-                            # If cutting donor is missing, mark it
-                            cutting_seq = "[MISSING_CUTTING_DONOR]"
-                            print(f"Warning: Could not find cutting donor with UID {cut_by_uid}")
-
-                        # Determine which half is left and which is right
-                        left_record = record if half == "L" else matching_record
-                        right_record = matching_record if half == "L" else record
-
-                        # Create reconstructed donor sequence (with cutting donor)
-                        reconstructed_seq = ""
-                        # First add the left fragment
-                        reconstructed_seq += str(left_record.seq)
-                        # Add the cutting donor
-                        reconstructed_seq += cutting_seq
-                        # Add the right fragment
-                        reconstructed_seq += str(right_record.seq)
-
-                        # Create record for the reconstructed donor
-                        rec_id = f"{seq_id}_reconstructed_cut_donor_{uid}_{cut_by_uid}"
-                        rec_record = create_sequence_record(reconstructed_seq, rec_id)
-                        rec_record.annotations["original_fragments"] = [uid, matching_uid]
-                        rec_record.annotations["cutting_donor"] = cut_by_uid
-
-                        reconstructed_donors.append(rec_record)
-
-                        # Also create a clean reconstructed donor (without cutting donor)
-                        clean_reconstructed_seq = str(left_record.seq) + str(right_record.seq)
-                        clean_rec_id = f"{seq_id}_clean_reconstructed_donor_{uid}_{cut_by_uid}"
-                        clean_rec_record = create_sequence_record(clean_reconstructed_seq, clean_rec_id)
-                        clean_rec_record.annotations["original_fragments"] = [uid, matching_uid]
-
-                        reconstructed_donors.append(clean_rec_record)
-
-                        # Mark both fragments as processed
-                        processed_uids.add(uid)
-                        processed_uids.add(matching_uid)
-
-                        # Successfully found a match, proceed to next record
-                        break
-
-        return reconstructed_donors
 
     def to_graphviz_dot(self, node_id_prefix: str = "node") -> str:
         """
@@ -1530,7 +1493,7 @@ class SeqGenerator:
 
         # Collect donor sequences once after all iterations if tracking is enabled
         if self.flag_track:
-            used_donors, reconstructed_donors = seq_tree.collect_donors(seq_record.id)
+            used_donors, reconstructed_donors = seq_tree.donors(seq_record.id)
             all_used_donors = used_donors if used_donors else []
             all_reconstructed_donors = reconstructed_donors if reconstructed_donors else []
 
@@ -1672,6 +1635,351 @@ class SeqGenerator:
                     output_dict[f"cut_donors{suffix}.fa"] = clean_recs
 
         save_multi_fasta_from_dict(output_dict, output_dir)
+
+class DonorNestingGraph:
+    """
+    表示donor序列嵌套关系的图数据结构。
+    用于高效跟踪和重建嵌套的donor序列。
+    """
+    def __init__(self):
+        # 节点字典：UID -> 节点数据
+        self.nodes = {}
+        # 嵌套关系图：(左半UID, 右半UID) -> [(嵌套左半UID, 嵌套右半UID, 切割donor_UID), ...]
+        self.nesting_edges = {}
+        # 切割映射：切割donor_UID -> [(被切割左半UID, 被切割右半UID), ...]
+        self.cut_relations = {}
+        # 被切割映射：被切割donor对 -> 切割它的donor列表
+        self.cut_by_relations = {}
+        # 半部分追踪：UID -> 完整donor的(左半UID, 右半UID)
+        self.half_to_whole = {}
+        # 状态跟踪
+        self.is_built = False
+        
+    def add_node(self, uid, data, attrs=None):
+        """添加节点到图中"""
+        if attrs is None:
+            attrs = {}
+        self.nodes[uid] = {
+            'data': data,
+            'attrs': attrs.copy(),
+            'is_donor': attrs.get('is_donor', False),
+            'half_type': attrs.get('half', [None])[0] if 'half' in attrs else None,
+            'cut_by': attrs.get('cut_by', []),
+            'nested_in': attrs.get('nested_in', [])
+        }
+        return self
+        
+    def add_cut_relation(self, cutting_uid, left_uid, right_uid):
+        """添加切割关系"""
+        # 记录哪个donor切割了哪对donor
+        if cutting_uid not in self.cut_relations:
+            self.cut_relations[cutting_uid] = []
+        cut_pair = (left_uid, right_uid)
+        if cut_pair not in self.cut_relations[cutting_uid]:
+            self.cut_relations[cutting_uid].append(cut_pair)
+            
+        # 记录哪对donor被哪个donor切割
+        if cut_pair not in self.cut_by_relations:
+            self.cut_by_relations[cut_pair] = []
+        if cutting_uid not in self.cut_by_relations[cut_pair]:
+            self.cut_by_relations[cut_pair].append(cutting_uid)
+            
+        # 更新半部分到完整donor的映射
+        self.half_to_whole[left_uid] = cut_pair
+        self.half_to_whole[right_uid] = cut_pair
+        
+        return self
+        
+    def add_nesting_relation(self, nested_uid, container_left_uid, container_right_uid):
+        """添加嵌套关系，记录donor嵌套在哪对donor中"""
+        container_key = (container_left_uid, container_right_uid)
+        
+        # 获取被嵌套donor切割的donor对
+        cut_pairs = self.cut_relations.get(nested_uid, [])
+        
+        for cut_pair in cut_pairs:
+            cut_left_uid, cut_right_uid = cut_pair
+            
+            # 添加嵌套边
+            if container_key not in self.nesting_edges:
+                self.nesting_edges[container_key] = []
+                
+            nested_triple = (cut_left_uid, cut_right_uid, nested_uid)
+            if nested_triple not in self.nesting_edges[container_key]:
+                self.nesting_edges[container_key].append(nested_triple)
+        
+        return self
+        
+    def build_from_donor_records(self, donor_records):
+        """从donor记录列表构建嵌套关系图"""
+        # 首先添加所有节点
+        for record in donor_records:
+            uid = record.annotations.get("uid")
+            if uid is not None:
+                self.add_node(uid, str(record.seq), record.annotations)
+        
+        # 处理嵌套和切割关系
+        for record in donor_records:
+            uid = record.annotations.get("uid")
+            if uid is None:
+                continue
+                
+            # 处理被切割的关系
+            if "cut_by" in record.annotations and "half" in record.annotations:
+                cut_by_list = record.annotations["cut_by"]
+                half_list = record.annotations["half"]
+                
+                for i, (cutting_uid, half) in enumerate(zip(cut_by_list, half_list)):
+                    # 查找匹配的另一半
+                    opposite_half = "R" if half == "L" else "L"
+                    
+                    # 查找所有被同一个donor切割且是另一半的记录
+                    for other_record in donor_records:
+                        other_uid = other_record.annotations.get("uid")
+                        if other_uid == uid or other_uid is None:
+                            continue
+                            
+                        if "cut_by" not in other_record.annotations or "half" not in other_record.annotations:
+                            continue
+                            
+                        other_cut_by_list = other_record.annotations["cut_by"]
+                        other_half_list = other_record.annotations["half"]
+                        
+                        # 查找匹配的切割关系
+                        for j, (other_cutting_uid, other_half) in enumerate(zip(other_cut_by_list, other_half_list)):
+                            if other_cutting_uid == cutting_uid and other_half == opposite_half:
+                                # 找到匹配的一对，确定左右关系
+                                left_uid = uid if half == "L" else other_uid
+                                right_uid = other_uid if half == "L" else uid
+                                
+                                # 添加切割关系
+                                self.add_cut_relation(cutting_uid, left_uid, right_uid)
+            
+            # 处理嵌套关系
+            if "nested_in" in record.annotations:
+                nested_pairs = record.annotations["nested_in"]
+                for container_pair in nested_pairs:
+                    container_left_uid, container_right_uid = container_pair
+                    self.add_nesting_relation(uid, container_left_uid, container_right_uid)
+        
+        self.is_built = True
+        return self
+    
+    def get_nested_donors(self, left_uid, right_uid):
+        """获取嵌套在指定donor对中的所有donor"""
+        container_key = (left_uid, right_uid)
+        return self.nesting_edges.get(container_key, [])
+    
+    def get_cutting_donors(self, left_uid, right_uid):
+        """获取切割指定donor对的所有donor"""
+        container_key = (left_uid, right_uid)
+        return self.cut_by_relations.get(container_key, [])
+    
+    def get_cut_pairs_by_donor(self, cutting_uid):
+        """获取被指定donor切割的所有donor对"""
+        return self.cut_relations.get(cutting_uid, [])
+    
+    def reconstruct_donors(self, seq_id):
+        """重建所有可能的donor序列，返回重建结果和排除列表"""
+        if not self.is_built:
+            raise ValueError("图尚未构建，请先调用build_from_donor_records")
+            
+        reconstructed_donors = []
+        excluded_uids = set()
+        
+        # 处理所有切割关系
+        for container_key in self.nesting_edges:
+            # 递归重建
+            result, excluded = self._reconstruct_donor_recursive(container_key, seq_id)
+            if result:
+                reconstructed_donors.extend(result)
+                excluded_uids.update(excluded)
+                
+        # 处理简单切割情况（未构成复杂嵌套的）
+        for cut_pair, cutting_uids in self.cut_by_relations.items():
+            left_uid, right_uid = cut_pair
+            
+            # 跳过已处理的
+            if left_uid in excluded_uids or right_uid in excluded_uids:
+                continue
+                
+            for cutting_uid in cutting_uids:
+                # 跳过已处理的
+                if cutting_uid in excluded_uids:
+                    continue
+                    
+                # 创建简单重建
+                result = self._create_simple_reconstruction(left_uid, right_uid, cutting_uid, seq_id)
+                if result:
+                    left_rec, right_rec, full_rec, clean_rec = result
+                    reconstructed_donors.extend([full_rec, clean_rec])
+                    excluded_uids.update([left_uid, right_uid, cutting_uid])
+        
+        return reconstructed_donors, excluded_uids
+    
+    def _reconstruct_donor_recursive(self, donor_key, seq_id, depth=0, visited=None):
+        """递归重建donor序列"""
+        if visited is None:
+            visited = set()
+            
+        # 防止无限递归
+        if depth > 50 or donor_key in visited:
+            return [], set()
+            
+        visited.add(donor_key)
+        left_uid, right_uid = donor_key
+        
+        # 获取左右半部分数据
+        left_node = self.nodes.get(left_uid)
+        right_node = self.nodes.get(right_uid)
+        
+        if not left_node or not right_node:
+            return [], set()
+            
+        left_seq = left_node['data']
+        right_seq = right_node['data']
+        
+        # 检查是否有嵌套的donor
+        nested_triples = self.get_nested_donors(left_uid, right_uid)
+        
+        if not nested_triples:
+            # 基本情况：没有嵌套的donor，直接合并
+            clean_seq = left_seq + right_seq
+            clean_id = f"{seq_id}_clean_reconstructed_donor_{left_uid}_{right_uid}"
+            clean_rec = create_sequence_record(clean_seq, clean_id)
+            clean_rec.annotations["original_fragments"] = [left_uid, right_uid]
+            clean_rec.annotations["reconstruction_level"] = depth
+            
+            return [clean_rec], {left_uid, right_uid}
+        
+        # 复杂情况：有嵌套的donor
+        reconstructed_list = []
+        all_excluded = {left_uid, right_uid}
+        
+        # 创建基本重建
+        clean_seq = left_seq + right_seq
+        clean_id = f"{seq_id}_clean_reconstructed_donor_{left_uid}_{right_uid}"
+        clean_rec = create_sequence_record(clean_seq, clean_id)
+        clean_rec.annotations["original_fragments"] = [left_uid, right_uid]
+        clean_rec.annotations["reconstruction_level"] = depth
+        reconstructed_list.append(clean_rec)
+        
+        # 处理每个嵌套的donor
+        for nested_left_uid, nested_right_uid, cutting_uid in nested_triples:
+            # 获取切割donor
+            cutting_node = self.nodes.get(cutting_uid)
+            if not cutting_node:
+                continue
+                
+            cutting_seq = cutting_node['data']
+            
+            # 为每个嵌套donor创建完整重建
+            full_seq = left_seq + cutting_seq + right_seq
+            full_id = f"{seq_id}_full_reconstructed_donor_{left_uid}_{cutting_uid}_{right_uid}"
+            full_rec = create_sequence_record(full_seq, full_id)
+            full_rec.annotations["original_fragments"] = [left_uid, right_uid]
+            full_rec.annotations["cutting_donor"] = cutting_uid
+            full_rec.annotations["reconstruction_level"] = depth
+            reconstructed_list.append(full_rec)
+            
+            # 递归重建嵌套donor
+            nested_key = (nested_left_uid, nested_right_uid)
+            nested_results, nested_excluded = self._reconstruct_donor_recursive(
+                nested_key, seq_id, depth+1, visited.copy()
+            )
+            
+            for nested_rec in nested_results:
+                # 创建递归重建
+                recursive_seq = left_seq + str(nested_rec.seq) + right_seq
+                recursive_id = f"{seq_id}_recursive_reconstructed_{left_uid}_{cutting_uid}_{right_uid}_level{depth+1}"
+                recursive_rec = create_sequence_record(recursive_seq, recursive_id)
+                recursive_rec.annotations["original_fragments"] = [left_uid, right_uid]
+                recursive_rec.annotations["nested_reconstruction"] = nested_rec.id
+                recursive_rec.annotations["reconstruction_level"] = depth
+                reconstructed_list.append(recursive_rec)
+            
+            all_excluded.update(nested_excluded)
+            all_excluded.add(cutting_uid)
+        
+        return reconstructed_list, all_excluded
+    
+    def _create_simple_reconstruction(self, left_uid, right_uid, cutting_uid, seq_id):
+        """创建简单的重建（不涉及复杂嵌套）"""
+        left_node = self.nodes.get(left_uid)
+        right_node = self.nodes.get(right_uid)
+        cutting_node = self.nodes.get(cutting_uid)
+        
+        if not left_node or not right_node or not cutting_node:
+            return None
+            
+        left_seq = left_node['data']
+        right_seq = right_node['data']
+        cutting_seq = cutting_node['data']
+        
+        # 左半部分记录
+        left_id = f"{seq_id}_left_fragment_{left_uid}"
+        left_rec = create_sequence_record(left_seq, left_id)
+        left_rec.annotations["fragment_type"] = "left"
+        left_rec.annotations["original_uid"] = left_uid
+        
+        # 右半部分记录
+        right_id = f"{seq_id}_right_fragment_{right_uid}"
+        right_rec = create_sequence_record(right_seq, right_id)
+        right_rec.annotations["fragment_type"] = "right"
+        right_rec.annotations["original_uid"] = right_uid
+        
+        # 完整重建（含切割donor）
+        full_seq = left_seq + cutting_seq + right_seq
+        full_id = f"{seq_id}_reconstructed_donor_{left_uid}_{cutting_uid}_{right_uid}"
+        full_rec = create_sequence_record(full_seq, full_id)
+        full_rec.annotations["original_fragments"] = [left_uid, right_uid]
+        full_rec.annotations["cutting_donor"] = cutting_uid
+        
+        # 干净重建（不含切割donor）
+        clean_seq = left_seq + right_seq
+        clean_id = f"{seq_id}_clean_reconstructed_donor_{left_uid}_{right_uid}"
+        clean_rec = create_sequence_record(clean_seq, clean_id)
+        clean_rec.annotations["original_fragments"] = [left_uid, right_uid]
+        
+        return left_rec, right_rec, full_rec, clean_rec
+    
+    def to_graphviz(self, prefix="donor_graph"):
+        """生成Graphviz DOT格式可视化"""
+        lines = ["digraph DonorNestingGraph {", 
+                 "  bgcolor=\"#FFFFFF\";", 
+                 "  node [shape=box, style=filled, fontsize=10];"]
+        
+        # 添加节点
+        for uid, node in self.nodes.items():
+            node_type = "Donor" if node.get('is_donor', False) else "Fragment"
+            half_info = f" ({node.get('half_type', '')})" if node.get('half_type') else ""
+            label = f"{node_type}{half_info}\\nUID: {uid}\\nLen: {len(node['data'])}"
+            
+            color = "#AAFFAA"  # 默认绿色
+            if node.get('is_donor', False):
+                color = "#AAAAFF"  # donor蓝色
+            if node.get('half_type'):
+                color = "#FFAAAA"  # 半部分红色
+                
+            lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
+        
+        # 添加切割边
+        for cutting_uid, cut_pairs in self.cut_relations.items():
+            for left_uid, right_uid in cut_pairs:
+                lines.append(f'  node_{cutting_uid} -> node_{left_uid} [label="cuts L", color="red"];')
+                lines.append(f'  node_{cutting_uid} -> node_{right_uid} [label="cuts R", color="red"];')
+                # 添加半部分之间的关系
+                lines.append(f'  node_{left_uid} -> node_{right_uid} [label="pair", style="dashed", color="blue"];')
+        
+        # 添加嵌套边
+        for container_key, nested_triples in self.nesting_edges.items():
+            container_left_uid, container_right_uid = container_key
+            for nested_left_uid, nested_right_uid, cutting_uid in nested_triples:
+                lines.append(f'  node_{cutting_uid} -> node_{container_left_uid} [label="nested in", color="green"];')
+                lines.append(f'  node_{cutting_uid} -> node_{container_right_uid} [label="nested in", color="green"];')
+                    
+        lines.append("}")
+        return "\n".join(lines)
 
 def main():
     """Main function to handle command line arguments and execute the program."""
