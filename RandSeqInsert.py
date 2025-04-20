@@ -405,8 +405,7 @@ class SequenceTree:
                 else:
                     # Create new left child node
                     current.left = self._create_node(donor_seq, True, donor_attrs)
-                    # Use _update_node helper method instead of directly calling private methods
-                    self._update_node(current)
+                    current.update()
                     break
 
             # Case 2: Position is inside the current node
@@ -436,21 +435,18 @@ class SequenceTree:
                 # Get current node attributes
                 current_attrs = current.attrs.copy()
                 current_is_donor = current.is_donor
-                current_uid = current.uid
 
                 # Create new left child with left data
                 new_left = self._create_node(left_data, current_is_donor, current_attrs.copy())
                 if current.left:
                     new_left.left = current.left
-                    # Use _update_node helper method
-                    self._update_node(new_left)
+                    new_left.update()
 
                 # Create new right child with right data and original right child
                 new_right = self._create_node(right_data, current_is_donor, current_attrs.copy())
                 if current.right:
                     new_right.right = current.right
-                    # Use _update_node helper method
-                    self._update_node(new_right)
+                    new_right.update()
 
                 # Record nested insertion relationships
                 if current_is_donor:
@@ -500,8 +496,7 @@ class SequenceTree:
                 # Set new children
                 current.left = new_left
                 current.right = new_right
-                # Use _update_node helper method
-                self._update_node(current)
+                current.update()
                 break
 
             # Case 3: Position is in the current node's right subtree
@@ -516,8 +511,7 @@ class SequenceTree:
                 else:
                     # Create new right child node
                     current.right = self._create_node(donor_seq, True, donor_attrs)
-                    # Use _update_node helper method
-                    self._update_node(current)
+                    current.update()
                     break
             else:
                 raise RuntimeError("[ERROR] Should not reach here")
@@ -537,8 +531,7 @@ class SequenceTree:
                 current = current.balance()
                 parent.right = current
 
-            # Update parent node
-            self._update_node(parent)
+            parent.update()
 
             # Balance parent node
             current = parent.balance()
@@ -581,8 +574,7 @@ class SequenceTree:
             else:
                 # Insert as left child
                 node.left = self._create_node(donor_seq, True, donor_attrs)
-            # Use _update_node helper method
-            self._update_node(node)
+            node.update()
             return node.balance()
 
         # Case 2: Position is inside the current node
@@ -621,8 +613,7 @@ class SequenceTree:
             new_left = self._create_node(left_data, current_is_donor, current_attrs.copy())
             if node.left:
                 new_left.left = node.left
-                # Use _update_node helper method
-                self._update_node(new_left)
+                new_left.update()
                 # Balance left subtree
                 new_left = new_left.balance()
 
@@ -630,8 +621,7 @@ class SequenceTree:
             new_right = self._create_node(right_data, current_is_donor, current_attrs.copy())
             if node.right:
                 new_right.right = node.right
-                # Use _update_node helper method
-                self._update_node(new_right)
+                new_right.update()
                 # Balance right subtree
                 new_right = new_right.balance()
 
@@ -683,8 +673,7 @@ class SequenceTree:
             # Set new children
             node.left = new_left
             node.right = new_right
-            # Use _update_node helper method
-            self._update_node(node)
+            node.update()
 
             return node.balance()
 
@@ -695,8 +684,7 @@ class SequenceTree:
             else:
                 # Insert as right child
                 node.right = self._create_node(donor_seq, True, donor_attrs)
-            # Use _update_node helper method
-            self._update_node(node)
+            node.update()
             return node.balance()
 
         raise RuntimeError("[ERROR] Should not reach here")
@@ -706,40 +694,40 @@ class SequenceTree:
         # 如果已有图，直接返回
         if hasattr(self, '_nesting_graph') and self._nesting_graph.is_built:
             return self._nesting_graph
-            
+
         # 创建新图
         self._nesting_graph = DonorNestingGraph()
-        
+
         # 收集所有donor节点（不是记录）
         donor_nodes = self._collect_donor_nodes()
-        
+
         # 直接从节点构建图
         self._build_graph_from_nodes(donor_nodes)
-        
+
         # 标记图已构建
         self._nesting_graph.is_built = True
-        
+
         return self._nesting_graph
-        
+
     def _collect_donor_nodes(self):
         """收集树中所有donor节点
-        
+
         Returns:
             list: 所有donor节点列表
         """
         # 使用列表推导式筛选所有 is_donor=True 的节点
         return [node for node in self if node.is_donor]
-        
+
     def _build_graph_from_nodes(self, donor_nodes):
         """从收集的donor节点直接构建图
-        
+
         Args:
             donor_nodes (list): 所有donor节点列表
         """
         # 首先添加所有节点
         for node in donor_nodes:
             self._nesting_graph.add_node(node.uid, node.data, node.attrs)
-        
+
         # 处理所有节点的关系
         for node in donor_nodes:
             # 处理切割关系
@@ -993,18 +981,6 @@ class SequenceTree:
             edges.append(f'{node_id} -> {right_id} [label="R"];')
 
         return nodes, edges
-
-    @staticmethod
-    def _update_node(node: SequenceNode) -> None:
-        """
-        Helper method to update a node's height and total length.
-        Correctly calls the node's internal methods.
-
-        Args:
-            node (SequenceNode): The node to update
-        """
-        node.update_height()
-        node.update_total_length()
 
     def _update_uid_references(self, old_uid: int, new_uid: int) -> None:
         """
