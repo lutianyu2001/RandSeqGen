@@ -367,6 +367,10 @@ class SequenceTree:
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
         """
+        # Skip insertion if donor sequence is empty
+        if not donor_seq:
+            return
+
         # Convert 1-based position to 0-based for internal processing
         zero_based_position = abs_position - 1
         self.root = self._insert_iterative(self.root, zero_based_position, donor_seq, donor_attrs)
@@ -384,6 +388,10 @@ class SequenceTree:
         Returns:
             SequenceNode: New root node after insertion
         """
+        # Skip insertion if donor sequence is empty
+        if not donor_seq:
+            return node
+
         current = node
         parent_stack = []
         path_directions = []  # Record the path direction from root to current node ('left' or 'right')
@@ -545,6 +553,10 @@ class SequenceTree:
             donor_seq (str): Donor sequence to insert
             donor_attrs (dict): Attributes for the donor
         """
+        # Skip insertion if donor sequence is empty
+        if not donor_seq:
+            return
+
         # Convert 1-based position to 0-based for internal processing
         zero_based_position = abs_position - 1
         self.root = self._insert_recursive(self.root, zero_based_position, donor_seq, donor_attrs)
@@ -562,6 +574,10 @@ class SequenceTree:
         Returns:
             SequenceNode: New node after insertion
         """
+        # Skip insertion if donor sequence is empty
+        if not donor_seq:
+            return node
+
         # Calculate positions in tree
         left_length = node.left.total_length if node.left else 0
 
