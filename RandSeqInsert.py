@@ -75,7 +75,7 @@ def add_indel_mutation(seq: str) -> str:
         return seq
 
     # 50% probability of insertion or deletion
-    is_insertion = random.choice([True, False])
+    is_insertion = random.random() < 0.5
     new_base = random.choice("ATGC")
 
     if is_insertion:
@@ -1654,7 +1654,7 @@ class SeqGenerator:
                 - Used donors (if tracking enabled)
                 - Reconstructed donors (if tracking enabled)
         """
-        random.seed(os.getpid() + int(time.time()))
+        random.seed(os.getpid() + time.perf_counter_ns())
         # If idx_or_record is an integer, retrieve the sequence record
         # If it's already a SeqRecord, use it directly
         if isinstance(idx_or_record, int):
@@ -1741,7 +1741,8 @@ class SeqGenerator:
             self.__process_single_batch(batch_num)
 
         # Print summary
-        total_elapsed_time = time.time() - start_time
+        end_time = time.time()
+        total_elapsed_time = end_time - start_time
         self.__print_summary(total_elapsed_time)
 
     def __print_summary(self, total_elapsed_time: float):
@@ -1767,7 +1768,7 @@ class SeqGenerator:
         batch_start_time = time.time()
 
         # Set random seed for this batch
-        random.seed(int(time.time()) + batch_num)
+        random.seed(time.perf_counter_ns() + batch_num)
 
         print(f"\nProcessing batch {batch_num}/{self.batch}")
 
