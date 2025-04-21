@@ -22,7 +22,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 import time
 
-VERSION = "v1.0.0"
+VERSION = "v1.1.0"
 INFO = ("by Tianyu (Sky) Lu (tianyu@lu.fm) "
         "released under GPLv3")
 
@@ -129,20 +129,20 @@ class SequenceNode:
     Node in a sequence tree structure, used for efficient sequence insertion operations.
     Implemented as an AVL tree to maintain balance during insertions.
     """
-    def __init__(self, data: str, is_donor: bool = False, attrs: dict = None, uid: int = None):
+    def __init__(self, data: str, is_donor: bool = False, donor_id: str = None, uid: int = None):
         """
         Initialize a sequence node.
 
         Args:
             data (str): The sequence string
             is_donor (bool): Whether this node contains a donor sequence
-            attrs: Additional information about the node (such as position)
+            donor_id (str): Identifier for the donor sequence (if is_donor is True)
             uid (int): Unique identifier for this node
         """
         self.data = data
         self.length = len(data)
         self.is_donor = is_donor
-        self.attrs = {} if attrs is None else attrs.copy()
+        self.donor_id = donor_id
         self.left = None
         self.right = None
         self.uid = uid
@@ -313,6 +313,12 @@ class SequenceTree:
 
         # Create the root node
         self.root = self._create_node(initial_seq, False)
+        
+        # 创建嵌套关系图
+        self.nesting_graph = DonorNestingGraph()
+        
+        # 将根节点添加到嵌套关系图
+        self.nesting_graph.add_node(self.root.uid, initial_seq)
 
     def __str__(self) -> str:
         """
@@ -341,31 +347,32 @@ class SequenceTree:
             del self.node_dict[uid]
             self.available_uids.append(uid)
 
-    def _create_node(self, data: str, is_donor: bool = False, attrs: dict = None) -> SequenceNode:
+    def _create_node(self, data: str, is_donor: bool = False, donor_id: str = None) -> SequenceNode:
         """
         Create a new SequenceNode with a unique UID.
 
         Args:
             data (str): Sequence data
             is_donor (bool): Whether this node contains a donor sequence
-            attrs (dict): Additional attributes
+            donor_id (str): Donor ID for tracking and visualization
 
         Returns:
             SequenceNode: The newly created node
         """
         uid = self._get_next_uid()
-        node = SequenceNode(data, is_donor, attrs, uid)
+        node = SequenceNode(data, is_donor, donor_id, uid)
         self.node_dict[uid] = node
         return node
 
-    def insert(self, abs_position: int, donor_seq: str, donor_attrs: dict) -> None:
+    def insert(self, abs_position: int, donor_seq: str, donor_id: str = None, tsd_length: int = 0) -> None:
         """
         Insert a donor sequence at the specified position.
 
         Args:
             abs_position (int): Absolute position for insertion (1-based)
             donor_seq (str): Donor sequence to insert
-            donor_attrs (dict): Attributes for the donor
+            donor_id (str): Identifier for the donor sequence
+            tsd_length (int): Length of Target Site Duplication (TSD) to generate
         """
         # Skip insertion if donor sequence is empty
         if not donor_seq:
@@ -373,9 +380,10 @@ class SequenceTree:
 
         # Convert 1-based position to 0-based for internal processing
         zero_based_position = abs_position - 1
-        self.root = self._insert_iterative(self.root, zero_based_position, donor_seq, donor_attrs)
+        self.root = self._insert_iterative(self.root, zero_based_position, donor_seq, donor_id, tsd_length)
 
-    def _insert_iterative(self, node: SequenceNode, abs_position: int, donor_seq: str, donor_attrs: dict) -> SequenceNode:
+    def _insert_iterative(self, node: SequenceNode, abs_position: int, donor_seq: str, 
+                          donor_id: str = None, tsd_length: int = 0) -> SequenceNode:
         """
         Iteratively insert a donor sequence at the absolute position in the tree.
 
@@ -383,7 +391,8 @@ class SequenceTree:
             node (SequenceNode): Current root node
             abs_position (int): Absolute position in the tree to insert at (0-based)
             donor_seq (str): Donor sequence to insert
-            donor_attrs (dict): Attributes for the donor
+            donor_id (str): Identifier for the donor sequence
+            tsd_length (int): Length of Target Site Duplication (TSD) to generate
 
         Returns:
             SequenceNode: New root node after insertion
@@ -395,6 +404,10 @@ class SequenceTree:
         current = node
         parent_stack = []
         path_directions = []  # Record the path direction from root to current node ('left' or 'right')
+
+        # 创建donor节点并添加到嵌套关系图
+        donor_node_uid = self._get_next_uid()  # 提前创建UID以在关系图中使用
+        self.nesting_graph.add_node(donor_node_uid, donor_seq, donor_id, abs_position)
 
         # Iteratively find insertion position
         while True:
@@ -411,7 +424,15 @@ class SequenceTree:
                     current = current.left
                 else:
                     # Create new left child node
-                    current.left = self._create_node(donor_seq, True, donor_attrs)
+                    new_donor = self._create_node(donor_seq, True, donor_id)
+                    new_donor.uid = donor_node_uid  # 使用预先创建的UID
+                    self.node_dict[donor_node_uid] = new_donor
+                    current.left = new_donor
+                    
+                    # 如果当前节点是donor，记录嵌套关系
+                    if current.is_donor:
+                        self.nesting_graph.add_nesting_relation(current.uid, donor_node_uid)
+                        
                     current.update()
                     break
 
@@ -423,7 +444,7 @@ class SequenceTree:
                 right_data = current.data[rel_pos:]
 
                 # Handle TSD generation
-                tsd_length = donor_attrs.get("tsd_length", 0)
+                tsd_5 = tsd_3 = ""
                 if tsd_length > 0:
                     # Extract source TSD sequence from the original sequence
                     source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
@@ -439,65 +460,64 @@ class SequenceTree:
                     left_data = left_data + tsd_5
                     right_data = tsd_3 + right_data
 
-                # Get current node attributes
-                current_attrs = current.attrs.copy()
-                current_is_donor = current.is_donor
+                # 确定当前节点是否是donor
+                is_current_donor = current.is_donor
+                current_donor_id = current.donor_id
+
+                # 创建左、右片段节点
+                left_node_uid = self._get_next_uid()
+                right_node_uid = self._get_next_uid()
+                
+                # 添加左右片段节点到关系图
+                self.nesting_graph.add_node(left_node_uid, left_data, current_donor_id, node_start)
+                self.nesting_graph.add_node(right_node_uid, right_data, current_donor_id, abs_position + len(donor_seq))
 
                 # Create new left child with left data
-                new_left = self._create_node(left_data, current_is_donor, current_attrs.copy())
+                new_left = self._create_node(left_data, is_current_donor, current_donor_id)
+                new_left.uid = left_node_uid
+                self.node_dict[left_node_uid] = new_left
+                
                 if current.left:
                     new_left.left = current.left
                     new_left.update()
 
                 # Create new right child with right data and original right child
-                new_right = self._create_node(right_data, current_is_donor, current_attrs.copy())
+                new_right = self._create_node(right_data, is_current_donor, current_donor_id)
+                new_right.uid = right_node_uid
+                self.node_dict[right_node_uid] = new_right
+                
                 if current.right:
                     new_right.right = current.right
                     new_right.update()
 
-                # Record nested insertion relationships
-                if current_is_donor:
-                    # Record that the donor was cut
-                    # Define the half attribute (left or right)
-                    new_left.attrs["half"] = ["L"] if "half" not in new_left.attrs else new_left.attrs["half"] + ["L"]
-                    new_right.attrs["half"] = ["R"] if "half" not in new_right.attrs else new_right.attrs["half"] + ["R"]
+                # 如果当前节点是donor，记录切割关系
+                if is_current_donor:
+                    # 添加切割关系到嵌套关系图
+                    self.nesting_graph.add_cut_relation(
+                        donor_node_uid,  # 切割者donor的UID
+                        current.uid,     # 被切割donor的UID
+                        left_node_uid,   # 切割后左片段的UID
+                        right_node_uid   # 切割后右片段的UID
+                    )
+                    
+                    # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
+                    containers = self.nesting_graph.get_containers(current.uid)
+                    for container_uid in containers:
+                        # 将嵌套关系从父节点转移到两个片段
+                        self.nesting_graph.add_nesting_relation(container_uid, left_node_uid)
+                        self.nesting_graph.add_nesting_relation(container_uid, right_node_uid)
+                elif not is_current_donor:
+                    # 如果不是donor，仍然要添加节点到图中，但不记录嵌套和切割关系
+                    # 因为我们需要在图中保持完整的树结构，目前只有添加节点相关代码
+                    pass
 
-                    # Prepare donor attrs to record that it's nested inside this donor
-                    donor_attrs_copy = donor_attrs.copy()
-                    if "nested_in" not in donor_attrs_copy:
-                        donor_attrs_copy["nested_in"] = []
-                    # Store L and R node UIDs
-                    donor_attrs_copy["nested_in"].append((new_left.uid, new_right.uid))
-
-                    # Record which donor cut this node
-                    if "cut_by" not in new_left.attrs:
-                        new_left.attrs["cut_by"] = []
-                    if "cut_by" not in new_right.attrs:
-                        new_right.attrs["cut_by"] = []
-
-                    # Create a new donor node and get its UID
-                    new_donor_uid = self._get_next_uid()
-
-                    new_left.attrs["cut_by"].append(new_donor_uid)
-                    new_right.attrs["cut_by"].append(new_donor_uid)
-
-                    # Release current node's UID and set new values
-                    old_uid = current.uid
-                    self._release_uid(current.uid)
-                    current.data = donor_seq
-                    current.length = len(donor_seq)
-                    current.is_donor = True
-                    current.attrs = donor_attrs_copy
-                    current.uid = new_donor_uid
-                    self.node_dict[new_donor_uid] = current
-                    # Update all references to the old UID
-                    self._update_uid_references(old_uid, new_donor_uid)
-                else:
-                    # Replace current node's data with the donor sequence
-                    current.data = donor_seq
-                    current.length = len(donor_seq)
-                    current.is_donor = True
-                    current.attrs = donor_attrs.copy()
+                # Replace current node's data with the donor sequence
+                current.data = donor_seq
+                current.length = len(donor_seq)
+                current.is_donor = True
+                current.donor_id = donor_id
+                current.uid = donor_node_uid
+                self.node_dict[donor_node_uid] = current
 
                 # Set new children
                 current.left = new_left
@@ -516,7 +536,15 @@ class SequenceTree:
                     current = current.right
                 else:
                     # Create new right child node
-                    current.right = self._create_node(donor_seq, True, donor_attrs)
+                    new_donor = self._create_node(donor_seq, True, donor_id)
+                    new_donor.uid = donor_node_uid  # 使用预先创建的UID
+                    self.node_dict[donor_node_uid] = new_donor
+                    current.right = new_donor
+                    
+                    # 如果当前节点是donor，记录嵌套关系
+                    if current.is_donor:
+                        self.nesting_graph.add_nesting_relation(current.uid, donor_node_uid)
+                        
                     current.update()
                     break
             else:
@@ -544,234 +572,6 @@ class SequenceTree:
 
         return current if not parent_stack else node.balance()
 
-    def insert_recursive(self, abs_position: int, donor_seq: str, donor_attrs: dict) -> None:
-        """
-        Recursively insert a donor sequence at the specified position.
-
-        Args:
-            abs_position (int): Absolute position for insertion (1-based)
-            donor_seq (str): Donor sequence to insert
-            donor_attrs (dict): Attributes for the donor
-        """
-        # Skip insertion if donor sequence is empty
-        if not donor_seq:
-            return
-
-        # Convert 1-based position to 0-based for internal processing
-        zero_based_position = abs_position - 1
-        self.root = self._insert_recursive(self.root, zero_based_position, donor_seq, donor_attrs)
-
-    def _insert_recursive(self, node: SequenceNode, abs_position: int, donor_seq: str, donor_attrs: dict) -> SequenceNode:
-        """
-        Recursively insert a donor sequence at the absolute position in the tree.
-
-        Args:
-            node (SequenceNode): Current node
-            abs_position (int): Absolute position in the tree to insert at (0-based)
-            donor_seq (str): Donor sequence to insert
-            donor_attrs (dict): Attributes for the donor
-
-        Returns:
-            SequenceNode: New node after insertion
-        """
-        # Skip insertion if donor sequence is empty
-        if not donor_seq:
-            return node
-
-        # Calculate positions in tree
-        left_length = node.left.total_length if node.left else 0
-
-        # Case 1: Position is in the current node's left subtree
-        if abs_position <= left_length:
-            if node.left:
-                node.left = self._insert_recursive(node.left, abs_position, donor_seq, donor_attrs)
-            else:
-                # Insert as left child
-                node.left = self._create_node(donor_seq, True, donor_attrs)
-            node.update()
-            return node.balance()
-
-        # Case 2: Position is inside the current node
-        node_start = left_length
-        node_end = node_start + node.length
-        if node_start < abs_position < node_end:
-            # Split this node
-            rel_pos = abs_position - node_start
-            left_data = node.data[:rel_pos]
-            right_data = node.data[rel_pos:]
-
-            # Handle TSD generation if requested in attributes
-            tsd_length = donor_attrs.get("tsd_length", 0)
-            if tsd_length > 0:
-                # Extract source TSD sequence from the original sequence
-                # We extract from the right side of the split point (beginning of right_data)
-                source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
-
-                # Generate TSD sequences (potentially with mutations)
-                tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
-
-                # Remove source TSD from right_data as it will be duplicated
-                if len(source_tsd_seq) > 0:
-                    right_data = right_data[len(source_tsd_seq):]
-
-                # Add TSD sequences to the left and right data
-                left_data = left_data + tsd_5
-                right_data = tsd_3 + right_data
-
-            # Get current node attributes
-            current_attrs = node.attrs.copy()
-            current_is_donor = node.is_donor
-
-            # Create new left child with left data
-            new_left = self._create_node(left_data, current_is_donor, current_attrs.copy())
-            if node.left:
-                new_left.left = node.left
-                new_left.update()
-                # Balance left subtree
-                new_left = new_left.balance()
-
-            # Create new right child with right data and original right child
-            new_right = self._create_node(right_data, current_is_donor, current_attrs.copy())
-            if node.right:
-                new_right.right = node.right
-                new_right.update()
-                # Balance right subtree
-                new_right = new_right.balance()
-
-            # Record nested insertion relationships
-            if current_is_donor:
-                # Record that the donor was cut
-                # Define the half attribute (left or right)
-                new_left.attrs["half"] = ["L"] if "half" not in new_left.attrs else new_left.attrs["half"] + ["L"]
-                new_right.attrs["half"] = ["R"] if "half" not in new_right.attrs else new_right.attrs["half"] + ["R"]
-
-                # Prepare donor attrs to record that it's nested inside this donor
-                donor_attrs_copy = donor_attrs.copy()
-                if "nested_in" not in donor_attrs_copy:
-                    donor_attrs_copy["nested_in"] = []
-                # Store L and R node UIDs
-                donor_attrs_copy["nested_in"].append((new_left.uid, new_right.uid))
-
-                # Record which donor cut this node
-                if "cut_by" not in new_left.attrs:
-                    new_left.attrs["cut_by"] = []
-                if "cut_by" not in new_right.attrs:
-                    new_right.attrs["cut_by"] = []
-
-                # Create a new donor node and get its UID
-                new_donor_uid = self._get_next_uid()
-
-                new_left.attrs["cut_by"].append(new_donor_uid)
-                new_right.attrs["cut_by"].append(new_donor_uid)
-
-                # Release current node's UID and set new values
-                old_uid = node.uid
-                self._release_uid(node.uid)
-                node.data = donor_seq
-                node.length = len(donor_seq)
-                node.is_donor = True
-                node.attrs = donor_attrs_copy
-                node.uid = new_donor_uid
-                self.node_dict[new_donor_uid] = node
-                # Update all references to the old UID
-                self._update_uid_references(old_uid, new_donor_uid)
-            else:
-                # Replace this node's data with the donor sequence
-                node.data = donor_seq
-                node.length = len(donor_seq)
-                node.is_donor = True
-                node.attrs = donor_attrs.copy()
-
-            # Set new children
-            node.left = new_left
-            node.right = new_right
-            node.update()
-
-            return node.balance()
-
-        # Case 3: Position is in the current node's right subtree
-        if abs_position >= node_end:
-            if node.right:
-                node.right = self._insert_recursive(node.right, abs_position - node_end, donor_seq, donor_attrs)
-            else:
-                # Insert as right child
-                node.right = self._create_node(donor_seq, True, donor_attrs)
-            node.update()
-            return node.balance()
-
-        raise RuntimeError("[ERROR] Should not reach here")
-
-    def build_nesting_graph(self):
-        """构建嵌套关系图"""
-        # 如果已有图，直接返回
-        if hasattr(self, '_nesting_graph') and self._nesting_graph.is_built:
-            return self._nesting_graph
-
-        # 创建新图
-        self._nesting_graph = DonorNestingGraph()
-
-        # 收集所有donor节点（不是记录）
-        donor_nodes = self._collect_donor_nodes()
-
-        # 直接从节点构建图
-        self._build_graph_from_nodes(donor_nodes)
-
-        # 标记图已构建
-        self._nesting_graph.is_built = True
-
-        return self._nesting_graph
-
-    def _collect_donor_nodes(self):
-        """收集树中所有donor节点
-
-        Returns:
-            list: 所有donor节点列表
-        """
-        # 使用列表推导式筛选所有 is_donor=True 的节点
-        return [node for node in self if node.is_donor]
-
-    def _build_graph_from_nodes(self, donor_nodes):
-        """从收集的donor节点直接构建图
-
-        Args:
-            donor_nodes (list): 所有donor节点列表
-        """
-        # 首先添加所有节点
-        for node in donor_nodes:
-            self._nesting_graph.add_node(node.uid, node.data, node.attrs)
-
-        # 处理所有节点的关系
-        for node in donor_nodes:
-            # 处理切割关系
-            if "cut_by" in node.attrs and "half" in node.attrs:
-                cut_by_list = node.attrs.get("cut_by", [])
-                half_list = node.attrs.get("half", [])
-                for i, (cutting_uid, half) in enumerate(zip(cut_by_list, half_list)):
-                    # 查找匹配的另一半
-                    opposite_half = "R" if half == "L" else "L"
-                    # 查找所有被同一个donor切割且是另一半的节点
-                    for other_node in donor_nodes:
-                        if other_node.uid == node.uid:
-                            continue
-                        if "cut_by" not in other_node.attrs or "half" not in other_node.attrs:
-                            continue
-                        other_cut_by_list = other_node.attrs.get("cut_by", [])
-                        other_half_list = other_node.attrs.get("half", [])
-                        # 查找匹配的切割关系
-                        for j, (other_cutting_uid, other_half) in enumerate(zip(other_cut_by_list, other_half_list)):
-                            if other_cutting_uid == cutting_uid and other_half == opposite_half:
-                                # 找到匹配的一对，确定左右关系
-                                left_uid = node.uid if half == "L" else other_node.uid
-                                right_uid = other_node.uid if half == "L" else node.uid
-                                # 添加切割关系
-                                self._nesting_graph.add_cut_relation(cutting_uid, left_uid, right_uid)
-            # 处理嵌套关系
-            if "nested_in" in node.attrs:
-                nested_pairs = node.attrs.get("nested_in", [])
-                for container_pair in nested_pairs:
-                    container_left_uid, container_right_uid = container_pair
-                    self._nesting_graph.add_nesting_relation(node.uid, container_left_uid, container_right_uid)
-
     def donors(self, seq_id: str) -> Tuple[List[SeqRecord], List[SeqRecord]]:
         """
         收集所有donor节点并重建嵌套donor。
@@ -782,83 +582,89 @@ class SequenceTree:
 
         Returns:
             Tuple[List[SeqRecord], List[SeqRecord]]: 
-                - 常规donor记录（不包括被重建donor覆盖的）
+                - 普通donor记录（不包括被重建donor覆盖的）
                 - 重建的donor记录
         """
-        # 收集donor记录
-        donor_records, _ = self._collect_donors(self.root, seq_id)
-        # 构建嵌套关系图
-        nesting_graph = self.build_nesting_graph()
-        # 使用图重建donor
-        reconstructed_donors, excluded_uids = nesting_graph.reconstruct_donors(seq_id)
+        # 收集所有donor节点
+        donor_records = self._collect_donor_records(seq_id)
+        
+        # 使用嵌套关系图重建donor
+        reconstructed_donors, excluded_uids = self.nesting_graph.reconstruct_donors(seq_id)
+        
         # 过滤掉被重建donor覆盖的记录
         if excluded_uids:
             donor_records = [record for record in donor_records 
-                             if record.annotations["uid"] not in excluded_uids]
+                             if record.annotations.get("uid") not in excluded_uids]
 
         return donor_records, reconstructed_donors
 
-    def _collect_donors(self, node: SequenceNode, seq_id: str, abs_position: int = 0) -> Tuple[List[SeqRecord], int]:
+    def _collect_donor_records(self, seq_id: str) -> List[SeqRecord]:
         """
-        Recursively collect donor nodes from the tree.
-
+        从树中收集所有donor节点，生成SeqRecord记录
+        
         Args:
-            node (SequenceNode): Current node
-            seq_id (str): ID of the original sequence
-            abs_position (int): Current absolute position (0-based)
-
+            seq_id (str): 原始序列ID
+            
         Returns:
-            Tuple[List[SeqRecord], int]: Donor records and total length
+            List[SeqRecord]: Donor记录列表
         """
-        if not node:
-            return [], 0
-
         donor_records = []
+        abs_position_map = self._calculate_absolute_positions()
+        
+        # 遍历所有节点
+        for node in self:
+            if node.is_donor:
+                # 获取节点的绝对位置信息
+                start_pos = abs_position_map.get(node.uid, 0)
+                end_pos = start_pos + node.length
+                
+                # 转换为1-based索引用于输出
+                start_pos_1based = start_pos + 1
+                end_pos_1based = end_pos
+                
+                # 创建donor ID
+                donor_id = f"{seq_id}_{start_pos_1based}_{end_pos_1based}-+-{node.length}"
+                if node.donor_id:
+                    donor_id += f"-{node.donor_id}"
+                    
+                # 创建record
+                donor_record = create_sequence_record(node.data, donor_id)
+                donor_record.annotations["uid"] = node.uid
+                donor_record.annotations["position"] = start_pos_1based
+                donor_record.annotations["length"] = node.length
+                
+                # 添加到结果列表
+                donor_records.append(donor_record)
+                
+        return donor_records
 
-        # Process left subtree
-        left_donors, left_length = self._collect_donors(node.left, seq_id, abs_position)
-        donor_records.extend(left_donors)
-
-        # Process current node
-        current_position = abs_position + left_length
-        if node.is_donor:
-            # Create a donor record with absolute position
-            start_index = current_position
-            end_index = start_index + node.length
-
-            # Convert 0-based indices to 1-based for output
-            start_index_1based = start_index + 1
-            end_index_1based = end_index
-
-            # Add information about nesting in the ID
-            nested_info = ""
-            if "nested_in" in node.attrs and node.attrs["nested_in"]:
-                # Process tuple format
-                nested_pairs = []
-                for pair in node.attrs["nested_in"]:
-                    l_uid, r_uid = pair
-                    nested_pairs.append(f"{l_uid}_{r_uid}")
-                nested_info = f"-nested_in_{'_'.join(nested_pairs)}"
-            donor_id = f"{seq_id}_{start_index_1based}_{end_index_1based}-+-{node.length}{nested_info}"
-            donor_record = create_sequence_record(node.data, donor_id)
-
-            # Add the node's UID and other attributes as annotations
-            donor_record.annotations["uid"] = node.uid
-
-            if "cut_by" in node.attrs and node.attrs["cut_by"]:
-                donor_record.annotations["cut_by"] = node.attrs["cut_by"]
-
-            if "half" in node.attrs and node.attrs["half"]:
-                donor_record.annotations["half"] = node.attrs["half"]
-
-            donor_records.append(donor_record)
-
-        # Process right subtree
-        right_donors, right_length = self._collect_donors(node.right, seq_id, current_position + node.length)
-        donor_records.extend(right_donors)
-
-        # Return all donors and total length
-        return donor_records, left_length + node.length + right_length
+    def _calculate_absolute_positions(self) -> Dict[int, int]:
+        """
+        计算树中每个节点的绝对位置
+        
+        Returns:
+            Dict[int, int]: 节点UID到绝对位置的映射
+        """
+        positions = {}
+        
+        def _traverse(node, current_pos=0):
+            if not node:
+                return current_pos
+                
+            # 处理左子树
+            left_end_pos = _traverse(node.left, current_pos)
+            
+            # 计算当前节点位置
+            node_pos = left_end_pos
+            positions[node.uid] = node_pos
+            
+            # 处理右子树
+            right_end_pos = _traverse(node.right, node_pos + node.length)
+            
+            return right_end_pos
+            
+        _traverse(self.root, 0)
+        return positions
 
     def to_graphviz_dot(self, node_id_prefix: str = "node") -> str:
         """
@@ -875,7 +681,7 @@ class SequenceTree:
 
         # Initialize the DOT string with graph declaration
         dot_str = ["digraph SequenceTree {",
-                   "  bgcolor=\"#FFF\"",
+                   "  bgcolor=\"#FFFFFF\"",
                    "  node [fontcolor=\"#000\", shape=box, style=filled];",
                    "  edge [fontcolor=\"#000\"];"]
 
@@ -897,7 +703,7 @@ class SequenceTree:
 
         Args:
             node (SequenceNode): Current node
-            node_id_prefix (str): Prefix for node IDs (not used when using uid as node ID)
+            node_id_prefix (str): Prefix for node IDs 
             abs_pos (int): Current absolute position (0-based)
 
         Returns:
@@ -926,28 +732,43 @@ class SequenceTree:
         # Determine node type and color
         node_type = "Donor" if node.is_donor else "Acceptor"
         fill_color = "lightblue" if node.is_donor else "lightgreen"
-        # Process nesting and cutting information
-        nested_in = ""
-        cut_half = ""
-
-        if "nested_in" in node.attrs and node.attrs["nested_in"]:
-            nested_in = "Nest: " + ','.join(map(str, node.attrs["nested_in"])).replace(' ', "") + "\\n"
-            fill_color = "yellow"  # Nested nodes shown in yellow
-
-        if "half" in node.attrs and node.attrs["half"]:
-            cut_half = "Cut: " + ','.join(node.attrs["half"]) + "\\n"
-            fill_color = "lightpink"  # Cut nodes shown in pink
-
-        if nested_in and cut_half:
+        
+        # 检查是否被切割
+        is_fragment = self.nesting_graph.is_fragment(node.uid)
+        if is_fragment:
+            orig_uid = self.nesting_graph.get_original_donor(node.uid)
+            frag_info = f"Fragment of {orig_uid}"
+            fill_color = "lightpink"  # 被切割的donor显示为粉色
+        else:
+            frag_info = ""
+            
+        # 检查是否有嵌套关系
+        nested_donors = self.nesting_graph.get_nested_donors(node.uid)
+        nested_in = self.nesting_graph.get_containers(node.uid)
+        
+        if nested_donors and nested_in:
+            # 既被嵌套又有嵌套的节点
             fill_color = "plum"
+        elif nested_donors:
+            # 含有嵌套donor的节点
+            fill_color = "yellow"
+        elif nested_in:
+            # 被嵌套在其他donor中的节点
+            fill_color = "orange"
 
         # Create node label with position information
         label = "".join([node_type, " | ", str(node.uid), "\\n",
-                         str(start_pos_1based), "\\l",
-                         str(end_pos_1based), "\\l",
-                         "Length: ", str(node.length), "\\n",
-                         nested_in,
-                         cut_half])
+                         str(start_pos_1based), "-", str(end_pos_1based), "\\n",
+                         "Length: ", str(node.length), "\\n"])
+                         
+        if frag_info:
+            label += frag_info + "\\n"
+            
+        if nested_donors:
+            label += f"Contains: {len(nested_donors)} donors\\n"
+            
+        if nested_in:
+            label += f"Nested in: {len(nested_in)} donors\\n"
 
         # Add the node to the nodes list
         nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
@@ -982,39 +803,266 @@ class SequenceTree:
 
         return nodes, edges
 
-    def _update_uid_references(self, old_uid: int, new_uid: int) -> None:
+class DonorNestingGraph:
+    """
+    表示donor序列嵌套关系的图数据结构。
+    用于高效追踪和重建嵌套的donor序列，替代之前在SequenceNode中的属性方式。
+    """
+    def __init__(self):
+        # 节点信息：UID -> {sequence, length, donor_id, positions}
+        self.nodes = {}
+        
+        # 嵌套关系：container_uid -> [nested_uid1, nested_uid2, ...]
+        # 记录哪些donor嵌套在指定donor内
+        self.nestings = {}
+        
+        # 反向嵌套关系：nested_uid -> [container_uid1, container_uid2, ...]
+        # 记录指定donor嵌套在哪些donor内
+        self.nested_in = {}
+        
+        # 切割关系：cutter_uid -> [(cut_uid, left_uid, right_uid), ...]
+        # 记录哪个donor切割了哪个donor，产生了哪两个新片段
+        self.cuts = {}
+        
+        # 反向切割关系：cut_uid -> [(cutter_uid, left_uid, right_uid), ...]
+        # 记录哪个donor被哪些donor切割，产生了哪些片段对
+        self.cut_by = {}
+        
+        # 片段关系：fragment_uid -> (original_uid, position, is_left)
+        # 记录每个片段来自哪个原始donor，位于哪个位置，是左半部分还是右半部分
+        self.fragments = {}
+        
+        # 返回父片段映射：left_uid/right_uid -> original_uid
+        # 记录左/右片段对应的原始donor
+        self.fragment_to_original = {}
+
+    def add_node(self, uid: int, sequence: str, donor_id: str = None, position: int = None):
         """
-        Update all references to old_uid with new_uid in the entire tree.
-        This method scans through all nodes in the tree and updates any references
-        to old_uid in cut_by and nested_in attributes with new_uid.
+        添加一个donor节点到图中
+        
         Args:
-            old_uid (int): The old UID being replaced
-            new_uid (int): The new UID to use instead
+            uid: 节点唯一标识符
+            sequence: 节点包含的序列
+            donor_id: donor序列标识符
+            position: 插入位置
         """
-        # Skip if old_uid and new_uid are the same
-        if old_uid == new_uid:
-            return
-        # Iterate through all nodes in the tree
-        for node_uid, node in self.node_dict.items():
-            # Update cut_by references
-            if "cut_by" in node.attrs and node.attrs["cut_by"]:
-                for i, cut_uid in enumerate(node.attrs["cut_by"]):
-                    if cut_uid == old_uid:
-                        node.attrs["cut_by"][i] = new_uid
-            # Update nested_in references (tuple format)
-            if "nested_in" in node.attrs and node.attrs["nested_in"]:
-                updated_nested_in = []
-                for nested_pair in node.attrs["nested_in"]:
-                    # Handle tuple format (L_uid, R_uid)
-                    l_uid, r_uid = nested_pair
-                    if l_uid == old_uid:
-                        l_uid = new_uid
-                    if r_uid == old_uid:
-                        r_uid = new_uid
-                    updated_nested_in.append((l_uid, r_uid))
-                node.attrs["nested_in"] = updated_nested_in
+        self.nodes[uid] = {
+            'sequence': sequence,
+            'length': len(sequence),
+            'donor_id': donor_id,
+            'position': position
+        }
+        
+        # 初始化关系映射
+        if uid not in self.nestings:
+            self.nestings[uid] = []
+        if uid not in self.nested_in:
+            self.nested_in[uid] = []
+            
+        return self
+
+    def add_nesting_relation(self, container_uid: int, nested_uid: int):
+        """
+        添加嵌套关系
+        
+        Args:
+            container_uid: 容器donor的UID
+            nested_uid: 嵌套在其中的donor的UID
+        """
+        # 确保节点存在
+        if container_uid not in self.nodes or nested_uid not in self.nodes:
+            return self
+        
+        # 添加正向和反向映射
+        if container_uid not in self.nestings:
+            self.nestings[container_uid] = []
+        if nested_uid not in self.nestings[container_uid]:
+            self.nestings[container_uid].append(nested_uid)
+            
+        if nested_uid not in self.nested_in:
+            self.nested_in[nested_uid] = []
+        if container_uid not in self.nested_in[nested_uid]:
+            self.nested_in[nested_uid].append(container_uid)
+            
+        return self
+        
+    def add_cut_relation(self, cutter_uid: int, cut_uid: int, left_uid: int, right_uid: int):
+        """
+        添加切割关系
+        
+        Args:
+            cutter_uid: 切割者donor的UID
+            cut_uid: 被切割donor的UID
+            left_uid: 切割后左片段的UID
+            right_uid: 切割后右片段的UID
+        """
+        # 确保节点存在
+        if not all(uid in self.nodes for uid in [cutter_uid, cut_uid, left_uid, right_uid]):
+            return self
+            
+        # 添加切割关系
+        if cutter_uid not in self.cuts:
+            self.cuts[cutter_uid] = []
+        self.cuts[cutter_uid].append((cut_uid, left_uid, right_uid))
+        
+        # 添加反向切割关系
+        if cut_uid not in self.cut_by:
+            self.cut_by[cut_uid] = []
+        self.cut_by[cut_uid].append((cutter_uid, left_uid, right_uid))
+        
+        # 记录片段关系
+        cut_position = self.nodes[cutter_uid]['position']
+        self.fragments[left_uid] = (cut_uid, cut_position, True)  # True表示左片段
+        self.fragments[right_uid] = (cut_uid, cut_position, False)  # False表示右片段
+        
+        # 添加返回父片段的映射
+        self.fragment_to_original[left_uid] = cut_uid
+        self.fragment_to_original[right_uid] = cut_uid
+        
+        return self
+    
+    def is_fragment(self, uid: int) -> bool:
+        """判断指定UID的节点是否为片段"""
+        return uid in self.fragments
+    
+    def get_original_donor(self, uid: int) -> int:
+        """获取片段对应的原始donor UID"""
+        return self.fragment_to_original.get(uid, uid)
+    
+    def get_all_fragments(self, original_uid: int) -> list:
+        """获取原始donor的所有片段"""
+        return [uid for uid, (orig, _, _) in self.fragments.items() if orig == original_uid]
+    
+    def get_nested_donors(self, container_uid: int) -> list:
+        """获取嵌套在指定donor中的所有donor"""
+        return self.nestings.get(container_uid, [])
+    
+    def get_containers(self, nested_uid: int) -> list:
+        """获取包含指定donor的所有donor"""
+        return self.nested_in.get(nested_uid, [])
+    
+    def get_cut_by(self, cut_uid: int) -> list:
+        """获取切割了指定donor的所有donor信息"""
+        return self.cut_by.get(cut_uid, [])
+    
+    def get_cuts(self, cutter_uid: int) -> list:
+        """获取被指定donor切割的所有donor信息"""
+        return self.cuts.get(cutter_uid, [])
+    
+    def reconstruct_donors(self, seq_id: str) -> tuple:
+        """基于嵌套和切割关系重建donor序列"""
+        reconstructed = []
+        excluded = set()
+        processed_fragments = set()
+        
+        # 首先查找所有需要递归重建的片段
+        def process_fragment_tree(fragment_uid, depth=0):
+            if fragment_uid in processed_fragments or depth > 50:
+                return
+            processed_fragments.add(fragment_uid)
+            
+            # 检查此片段是否被进一步切割
+            for cutter_uid, left_uid, right_uid in self.cut_by.get(fragment_uid, []):
+                # 递归处理子片段
+                process_fragment_tree(left_uid, depth+1)
+                process_fragment_tree(right_uid, depth+1)
+        
+        # 处理所有被切割的donor，从底层往上重建
+        for cut_uid in list(self.cut_by.keys()):
+            process_fragment_tree(cut_uid)
+        
+        # 按照处理顺序排序，确保先处理深层片段
+        fragments_to_process = sorted(list(processed_fragments), 
+                                    key=lambda uid: -len(self.cut_by.get(uid, [])))
+        
+        for fragment_uid in fragments_to_process:
+            if fragment_uid in excluded:
+                continue
+                
+            for cutter_uid, left_uid, right_uid in self.cut_by.get(fragment_uid, []):
+                # 跳过已处理的
+                if any(uid in excluded for uid in [fragment_uid, cutter_uid, left_uid, right_uid]):
+                    continue
+                    
+                # 获取序列数据
+                left_seq = self.nodes[left_uid]['sequence']
+                right_seq = self.nodes[right_uid]['sequence']
+                cutter_seq = self.nodes[cutter_uid]['sequence']
+                
+                # 创建两种重建版本
+                full_seq = left_seq + cutter_seq + right_seq
+                clean_seq = left_seq + right_seq
+                
+                # 添加重建记录
+                full_id = f"{seq_id}_reconstructed_{fragment_uid}_{cutter_uid}"
+                clean_id = f"{seq_id}_clean_reconstructed_{fragment_uid}"
+                
+                full_rec = create_sequence_record(full_seq, full_id)
+                full_rec.annotations["reconstruction_type"] = "full"
+                full_rec.annotations["original_uid"] = fragment_uid
+                full_rec.annotations["cutter_uid"] = cutter_uid
+                
+                clean_rec = create_sequence_record(clean_seq, clean_id)
+                clean_rec.annotations["reconstruction_type"] = "clean"
+                clean_rec.annotations["original_uid"] = fragment_uid
+                
+                reconstructed.extend([full_rec, clean_rec])
+                excluded.update([fragment_uid, cutter_uid, left_uid, right_uid])
+                
+        return reconstructed, excluded
+
+    def to_graphviz(self, prefix: str = "donor_graph") -> str:
+        """
+        生成Graphviz DOT格式可视化
+        
+        Args:
+            prefix: 图形文件名前缀
+            
+        Returns:
+            str: Graphviz DOT格式字符串
+        """
+        lines = ["digraph DonorNestingGraph {", 
+                 "  bgcolor=\"#FFFFFF\";", 
+                 "  node [shape=box, style=filled, fontsize=10];"]
+                 
+        # 添加所有节点
+        for uid, info in self.nodes.items():
+            node_type = "Donor"
+            fragment_info = ""
+            if self.is_fragment(uid):
+                orig_uid, pos, is_left = self.fragments[uid]
+                side = "Left" if is_left else "Right"
+                fragment_info = f"\\nFragment of {orig_uid} ({side})"
+                node_type = "Fragment"
+                
+            label = f"{node_type}\\nUID: {uid}\\nLen: {info['length']}{fragment_info}"
+            
+            # 设置颜色
+            color = "#AAFFAA"  # 默认绿色
+            if fragment_info:
+                color = "#FFAAAA"  # 片段为红色
+            elif node_type == "Donor":
+                color = "#AAAAFF"  # donor为蓝色
+                
+            lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
+            
+        # 添加嵌套关系边
+        for container_uid, nested_list in self.nestings.items():
+            for nested_uid in nested_list:
+                lines.append(f'  node_{container_uid} -> node_{nested_uid} [label="contains", color="green"];')
+                
+        # 添加切割关系边
+        for cutter_uid, cut_list in self.cuts.items():
+            for cut_uid, left_uid, right_uid in cut_list:
+                lines.append(f'  node_{cutter_uid} -> node_{cut_uid} [label="cuts", color="red"];')
+                lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="left", style="dashed", color="blue"];')
+                lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="right", style="dashed", color="blue"];')
+                
+        lines.append("}")
+        return '\n'.join(lines)
 
 # ======================================================================================================================
+# Utility Functions
 
 def convert_humanized_number(text: str, base: Union[float, int], units: Sequence[Union[str, Iterable[str]]]) -> float:
     """
@@ -1023,19 +1071,14 @@ def convert_humanized_number(text: str, base: Union[float, int], units: Sequence
     Parses strings containing numbers with optional unit suffixes and converts them
     to raw numerical values based on the provided base and unit definitions.
 
-    :param text: Input string containing the number and optional unit suffix.
-                Supports scientific notation.
-    :type text: str
-    :param base: Numerical base for unit conversion (e.g., 1000 or 1024).
-    :type base: Union[float, int]
-    :param units: Sequence of unit suffixes/aliases ordered by increasing scale.
-                  Can contain strings or iterables of aliases for each unit.
-                  Must start from the base unit. Use empty string for unitless case.
-    :type units: Sequence[Union[str, Iterable[str]]]
-    :return: The converted numerical value.
-    :rtype: float
-    :raises ValueError: If the input format is invalid or contains unrecognized units.
+    Args:
+        text: Input string containing the number and optional unit suffix
+        base: Numerical base for unit conversion (e.g., 1000 or 1024)
+        units: Sequence of unit suffixes ordered by increasing scale
 
+    Returns:
+        float: The converted numerical value
+    
     Examples:
         >>> convert_humanized_number("1.14 kbp", 1000, ["bp", ("kbp", "kb"), ("Mbp", "Mb")])
         1140.0
@@ -1073,25 +1116,32 @@ def convert_humanized_number(text: str, base: Union[float, int], units: Sequence
     return number * (base ** unit_index)
 
 def convert_humanized_int(number: Union[str, int]) -> int:
+    """
+    Convert a human-readable number string (e.g., '1k', '2M') to an integer.
+    
+    Args:
+        number: Either an integer or a string with optional k/m/b/t suffix
+        
+    Returns:
+        int: The converted integer value
+    """
     if isinstance(number, int):
         return number
     return int(convert_humanized_number(number, 1000, ("", 'K', 'M', 'B', 'T')))
 
-
 def sort_multiple_lists(base: list, *lists: list,
                         key: Optional[Callable] = None, reverse: bool = False) -> Union[list, tuple]:
     """
-    Synchronously sorts multiple lists based on the sorting order of the base list `base`.
+    Synchronously sorts multiple lists based on the sorting order of the base list.
 
     Args:
-        base (list): The base list used as the reference for sorting
-        *lists (list): Other lists to be sorted synchronously
-        key (callable, optional): A function to execute to decide the order. Default is None.
-        reverse (bool, optional): Whether to sort in descending order. Default is False.
+        base: The base list used as the reference for sorting
+        *lists: Other lists to be sorted synchronously
+        key: A function to execute to decide the order
+        reverse: Whether to sort in descending order
 
     Returns:
-        tuple: A tuple containing all sorted lists. The first element is the sorted base list,
-        the rest are the sorted lists in the same order as they were passed in.
+        tuple: A tuple containing all sorted lists
     """
     if not base:
         raise ValueError("[ERROR] Base list cannot be empty.")
@@ -1126,21 +1176,12 @@ def create_sequence_record(seq: str, id: str) -> SeqRecord:
     """
     Create a BioPython SeqRecord object from a sequence string and ID.
 
-    This function takes a biological sequence string and an identifier,
-    and returns a SeqRecord object from the BioPython library.
-
-    :param seq: The biological sequence as a string
-    :type seq: str
-    :param id: The unique identifier for the sequence
-    :type id: str
-    :return: A SeqRecord object containing the sequence and its metadata
-    :rtype: SeqRecord
-
-    Example::
-
-        >>> record = create_sequence_record("ATGC", "seq1")
-        >>> print(record.id)
-        seq1
+    Args:
+        seq: The biological sequence as a string
+        id: The unique identifier for the sequence
+        
+    Returns:
+        SeqRecord: A SeqRecord object containing the sequence and its metadata
     """
     return SeqRecord(Seq(seq), id=id, description="")
 
@@ -1149,8 +1190,8 @@ def save_multi_fasta_from_dict(records_dict: Dict[str, List[SeqRecord]], output_
     Save multiple FASTA files from a dictionary of sequence records.
 
     Args:
-        records_dict (Dict[str, List[SeqRecord]]): Dictionary mapping file names to lists of SeqRecord objects
-        output_dir_path (str): Directory path where the output files will be saved
+        records_dict: Dictionary mapping file names to lists of SeqRecord objects
+        output_dir_path: Directory path where the output files will be saved
     """
     if not records_dict:
         return
@@ -1192,29 +1233,12 @@ def _find_donor_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
     """
     Locate the donor library files.
 
-    This function attempts to find the given donor library directory or file in two locations:
-    1. The directly specified path
-    2. Under the default "lib" directory in the program root directory
-
     Args:
-        path (str): The path to search for donor library. Can be:
-                        - An absolute path to a directory or file
-                        - A relative path to a directory or file
+        path: The path to search for donor library
 
     Returns:
-        Optional[List[str]]: A list containing the absolute paths to the found donor library files,
-                             or None if path is None.
-
-    Raises:
-        SystemExit: If no valid donor library directory or file is found.
-
-    Examples:
-        >>> _find_donor_lib_abs_path_list("/abs/path/to/donors.fa")
-        ["/abs/path/to/donors.fa"]
-        >>> _find_donor_lib_abs_path_list("lib/rice")
-        ["/path/to/program/lib/rice/rice_DTA.fa", "/path/to/program/lib/rice/rice_DTC.fa",
-         "/path/to/program/lib/rice/rice_DTH.fa", "/path/to/program/lib/rice/rice_DTM.fa",
-         "/path/to/program/lib/rice/rice_DTT.fa"]
+        Optional[List[str]]: A list of absolute paths to the found donor library files,
+                           or None if path is None
     """
     if not path:
         return None
@@ -1227,7 +1251,7 @@ def _find_donor_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
     if os.path.exists(path) and os.path.isdir(path):
         donor_lib_files: List[str] = []
         for file in os.listdir(path):
-            if file.endswith((".fa", ".fa")):
+            if file.endswith((".fa", ".fasta")):
                 donor_lib_files.append(os.path.join(path, file))
         if donor_lib_files:
             return list(map(os.path.abspath, donor_lib_files))
@@ -1240,7 +1264,7 @@ def _find_donor_lib_abs_path_list(path: Optional[str]) -> Optional[List[str]]:
         elif os.path.isdir(default_donor_lib_abs_path):
             donor_lib_files: List[str] = []
             for file in os.listdir(default_donor_lib_abs_path):
-                if file.endswith(".fa"):
+                if file.endswith((".fa", ".fasta")):
                     donor_lib_files.append(os.path.join(default_donor_lib_abs_path, file))
             if donor_lib_files:
                 return donor_lib_files
@@ -1254,16 +1278,16 @@ def _load_multiple_donor_libs(path_list: List[str], weight_list: Optional[List[f
     Load multiple donor libraries by combining their sequences.
 
     Args:
-        path_list (List[str]): List of paths to donor libraries
-        weight_list (Optional[List[float]]): List of weights for each donor library
-        len_limit (Optional[int]): Maximum length limit for sequences to load
-        flag_filter_n (bool): Flag to filter out sequences containing N
+        path_list: List of paths to donor libraries
+        weight_list: List of weights for each donor library
+        len_limit: Maximum length limit for sequences to load
+        flag_filter_n: Flag to filter out sequences containing N
 
     Returns:
-        Tuple[List[str], List[int], List[float]] (Optional):
-            - List[str]: Combined list of donor sequences from all libraries
-            - List[int]: List of lengths of donor sequences
-            - List[float]: List of weights for each donor sequence
+        Tuple containing:
+            - Combined list of donor sequences from all libraries
+            - List of lengths of donor sequences
+            - List of weights for each donor sequence
     """
     if not path_list:
         return None
@@ -1272,8 +1296,8 @@ def _load_multiple_donor_libs(path_list: List[str], weight_list: Optional[List[f
     all_donor_len_list: List[int] = []
     all_donor_weight_list: List[float] = []
 
-    for path_list, weight in zip(path_list, weight_list or [None] * len(path_list)):
-        single_donor_lib_abs_path_list = _find_donor_lib_abs_path_list(path_list)
+    for lib_path, weight in zip(path_list, weight_list or [None] * len(path_list)):
+        single_donor_lib_abs_path_list = _find_donor_lib_abs_path_list(lib_path)
         if single_donor_lib_abs_path_list:
             single_donor_lib_sequences = load_sequences(single_donor_lib_abs_path_list, len_limit, flag_filter_n)
             if single_donor_lib_sequences:
@@ -1283,7 +1307,7 @@ def _load_multiple_donor_libs(path_list: List[str], weight_list: Optional[List[f
                     len_single_donor_lib_sequences = len(single_donor_lib_sequences)
                     all_donor_weight_list.extend([weight / len_single_donor_lib_sequences] * len_single_donor_lib_sequences)
 
-    # return sort_multiple_lists(all_donor_sequence_list, all_donor_weight_list, key=len)
+    # Sort by length
     all_donor_len_list, all_donor_sequence_list, all_donor_weight_list = sort_multiple_lists(
         all_donor_len_list, all_donor_sequence_list, all_donor_weight_list)
 
@@ -1293,30 +1317,31 @@ def _load_multiple_donor_libs(path_list: List[str], weight_list: Optional[List[f
 
     return all_donor_sequence_list, all_donor_len_list, all_donor_weight_list
 
+# ======================================================================================================================
+# Main Sequence Generator Class
+
 class SeqGenerator:
     def __init__(self, input_file: str, insertion: Union[str, int], batch: int, processors: int, output_dir_path: str,
                  donor_lib: Optional[List[str]] = None, donor_lib_weight: Optional[List[float]] = None,
                  donor_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
-                 tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False,
-                 iteration: int = 1):
+                 tsd_length: Optional[int] = None, flag_visual: bool = False, iteration: int = 1):
         """
         Initialize the sequence generator.
 
         Args:
-            input_file (str): Path to the input sequence file
-            insertion (Union[str, int]): Number of insertions per sequence
-            batch (int): Number of independent result files to generate
-            processors (int): Number of processors to use
-            output_dir_path (str): Directory to save output files
-            donor_lib (List[str], optional): List of donor library file paths
-            donor_lib_weight (List[float], optional): Weights for donor libraries
-            donor_len_limit (int, optional): Maximum length limit for donor sequences to load
-            flag_filter_n (bool): Whether to filter out sequences containing N
-            flag_track (bool): Whether to track donor sequences used
-            tsd_length (int, optional): Length of Target Site Duplication (TSD) to generate
-            flag_visual (bool): Whether to generate graphviz visualization of the sequence tree
-            flag_recursive (bool): Whether to use recursive insertion method
-            iteration (int): Number of insertion iterations to perform on each sequence
+            input_file: Path to the input sequence file
+            insertion: Number of insertions per sequence
+            batch: Number of independent result files to generate
+            processors: Number of processors to use
+            output_dir_path: Directory to save output files
+            donor_lib: List of donor library file paths
+            donor_lib_weight: Weights for donor libraries
+            donor_len_limit: Maximum length limit for donor sequences to load
+            flag_filter_n: Whether to filter out sequences containing N
+            flag_track: Whether to track donor sequences used
+            tsd_length: Length of Target Site Duplication (TSD) to generate
+            flag_visual: Whether to generate graphviz visualization of the sequence tree
+            iteration: Number of insertion iterations to perform on each sequence
         """
         self.input_file: str = input_file
         self.insertion: int = convert_humanized_int(insertion)
@@ -1328,7 +1353,6 @@ class SeqGenerator:
         self.flag_track: bool = flag_track
         self.tsd_length: Optional[int] = tsd_length
         self.flag_visual: bool = flag_visual
-        self.flag_recursive: bool = flag_recursive
         self.iteration: int = iteration
 
         # Load input sequence
@@ -1357,6 +1381,23 @@ class SeqGenerator:
             # Convert any exception during donor loading to a more informative error
             raise ValueError(f"Error loading donor libraries: {str(e)}")
 
+    def __print_header(self):
+        """
+        Print the program header with basic information.
+        """
+        print(f"=== RandSeqInsert {VERSION} ===")
+        print(f"Processing input file: {self.input_file}")
+        print(f"Number of input sequences: {len(self.input)}")
+        print(f"Insertion settings: {self.insertion} insertions per sequence")
+        if self.iteration > 1:
+            print(f"Performing {self.iteration} iterations of insertion")
+        if self.tsd_length:
+            print(f"TSD settings: Generating TSD of length {self.tsd_length} at insertion sites")
+        print(f"Donor library: {len(self.donor_sequences)} sequences loaded")
+        print(f"Generating {self.batch} independent result file(s)")
+        if self.flag_visual:
+            print(f"Tree visualization enabled: DOT files will be generated for each sequence")
+
     def __pre_check(self):
         """
         Perform pre-execution checks.
@@ -1365,14 +1406,16 @@ class SeqGenerator:
             os.makedirs(self.output_dir_path)
 
     def __process_batch_multiprocessing(self) -> Tuple[List[SeqRecord], 
-                                                                         Optional[List[SeqRecord]],
-                                                                         Optional[List[SeqRecord]]]:
+                                                      Optional[List[SeqRecord]],
+                                                      Optional[List[SeqRecord]]]:
         """
         Process a batch of sequences using multiprocessing.
 
         Returns:
-            Tuple[List[SeqRecord], Optional[List[SeqRecord]], Optional[List[SeqRecord]]]: 
-                All processed sequences, donor records, and reconstructed donor records
+            Tuple containing:
+                - All processed sequences
+                - Donor records (if tracking enabled)
+                - Reconstructed donor records (if tracking enabled)
         """
         if not self.input:
             return [], None, None
@@ -1407,17 +1450,18 @@ class SeqGenerator:
         Process a single sequence with random insertions, potentially over multiple iterations.
 
         Args:
-            idx_or_record: Either an index (int) to look up in self.input, or a SeqRecord to process directly
+            idx_or_record: Either an index to look up in self.input, or a SeqRecord to process directly
 
         Returns:
-            Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]]]: 
-                The processed sequence, used donors, and reconstructed donors if tracking
+            Tuple containing:
+                - The processed sequence
+                - Used donors (if tracking enabled)
+                - Reconstructed donors (if tracking enabled)
         """
         random.seed(os.getpid() + int(time.time()))
         # If idx_or_record is an integer, retrieve the sequence record
         # If it's already a SeqRecord, use it directly
         if isinstance(idx_or_record, int):
-            # Set random seed for multiprocessing
             seq_record = self.input[idx_or_record]
         else:
             seq_record = idx_or_record
@@ -1426,7 +1470,6 @@ class SeqGenerator:
         if not self.insertion or not self.donor_sequences:
             # If no insertions requested or no donor sequences available,
             # return the original sequence with modified ID
-            # May be useful for future random sequence generation function
             new_id = f"{seq_record.id}_ins0"
             return create_sequence_record(str(seq_record.seq), new_id), None, None
 
@@ -1435,6 +1478,7 @@ class SeqGenerator:
         # Track all used donors across iterations if tracking is enabled
         all_used_donors = [] if self.flag_track else None
         all_reconstructed_donors = [] if self.flag_track else None
+        
         # Perform multiple iterations of insertion
         for iteration in range(1, self.iteration + 1):
             # Get the current total sequence length (updated after each iteration)
@@ -1451,11 +1495,7 @@ class SeqGenerator:
 
             # Insert donors into the tree
             for pos, donor_seq in zip(insert_positions, selected_donors):
-                attrs = {"tsd_length": self.tsd_length} if self.tsd_length else {}
-                if self.flag_recursive:
-                    seq_tree.insert_recursive(pos, donor_seq, attrs)
-                else:
-                    seq_tree.insert(pos, donor_seq, attrs)
+                seq_tree.insert(pos, donor_seq, None, self.tsd_length)
 
         # Collect donor sequences once after all iterations if tracking is enabled
         if self.flag_track:
@@ -1499,31 +1539,12 @@ class SeqGenerator:
         total_elapsed_time = time.time() - start_time
         self.__print_summary(total_elapsed_time)
 
-    def __print_header(self):
-        """
-        Print the program header with basic information.
-        """
-        print(f"=== RandSeqInsert {VERSION} ===")
-        print(f"Processing input file: {self.input_file}")
-        print(f"Number of input sequences: {len(self.input)}")
-        print(f"Insertion settings: {self.insertion} insertions per sequence")
-        if self.iteration > 1:
-            print(f"Performing {self.iteration} iterations of insertion")
-        if self.tsd_length:
-            print(f"TSD settings: Generating TSD of length {self.tsd_length} at insertion sites")
-        print(f"Donor library: {len(self.donor_sequences)} sequences loaded")
-        print(f"Generating {self.batch} independent result file(s)")
-        if self.flag_recursive:
-            print(f"Using recursive insertion method")
-        if self.flag_visual:
-            print(f"Tree visualization enabled: DOT files will be generated for each sequence")
-
     def __print_summary(self, total_elapsed_time: float):
         """
         Print a summary of the processing results.
 
         Args:
-            total_elapsed_time (float): Total time taken for all batches
+            total_elapsed_time: Total time taken for all batches
         """
         print(f"\nAll batches completed in {total_elapsed_time:.2g} seconds")
         print(f"Results saved to \"{os.path.abspath(self.output_dir_path)}\"")
@@ -1533,7 +1554,7 @@ class SeqGenerator:
         Process a single batch of sequences.
 
         Args:
-            batch_num (int): Batch number (starting from 1)
+            batch_num: Batch number (starting from 1)
 
         Returns:
             float: Time taken to process this batch (seconds)
@@ -1567,11 +1588,11 @@ class SeqGenerator:
         Save the batch results to output files.
 
         Args:
-            output_dir (str): Directory to save the results
-            sequences (List[SeqRecord]): List of sequence records to save
-            donors (Optional[List[SeqRecord]]): List of donor records to save if tracking is enabled
-            reconstructed_donors (Optional[List[SeqRecord]]): List of reconstructed donor records
-            batch_num (int): The batch number (1-based index)
+            output_dir: Directory to save the results
+            sequences: List of sequence records to save
+            donors: List of donor records to save if tracking is enabled
+            reconstructed_donors: List of reconstructed donor records
+            batch_num: The batch number (1-based index)
         """
         if not sequences:
             print("No sequences to save")
@@ -1589,8 +1610,8 @@ class SeqGenerator:
 
             if reconstructed_donors:
                 # Group by reconstruction type
-                full_recs = [d for d in reconstructed_donors if "reconstructed_cut_donor" in d.id]
-                clean_recs = [d for d in reconstructed_donors if "clean_reconstructed_donor" in d.id]
+                full_recs = [d for d in reconstructed_donors if "reconstruction_type" in d.annotations and d.annotations["reconstruction_type"] == "full"]
+                clean_recs = [d for d in reconstructed_donors if "reconstruction_type" in d.annotations and d.annotations["reconstruction_type"] == "clean"]
 
                 if full_recs:
                     print(f"Saving {len(full_recs)} full reconstructed donor records")
@@ -1598,288 +1619,9 @@ class SeqGenerator:
 
                 if clean_recs:
                     print(f"Saving {len(clean_recs)} clean reconstructed donor records")
-                    output_dict[f"cut_donors{suffix}.fa"] = clean_recs
+                    output_dict[f"clean_reconstructed_donors{suffix}.fa"] = clean_recs
 
         save_multi_fasta_from_dict(output_dict, output_dir)
-
-class DonorNestingGraph:
-    """
-    表示donor序列嵌套关系的图数据结构。
-    用于高效跟踪和重建嵌套的donor序列。
-    """
-    def __init__(self):
-        # 节点字典：UID -> 节点数据
-        self.nodes = {}
-        # 嵌套关系图：(左半UID, 右半UID) -> [(嵌套左半UID, 嵌套右半UID, 切割donor_UID), ...]
-        self.nesting_edges = {}
-        # 切割映射：切割donor_UID -> [(被切割左半UID, 被切割右半UID), ...]
-        self.cut_relations = {}
-        # 被切割映射：被切割donor对 -> 切割它的donor列表
-        self.cut_by_relations = {}
-        # 半部分追踪：UID -> 完整donor的(左半UID, 右半UID)
-        self.half_to_whole = {}
-        # 状态跟踪
-        self.is_built = False
-    def add_node(self, uid, data, attrs=None):
-        """添加节点到图中"""
-        if attrs is None:
-            attrs = {}
-        self.nodes[uid] = {
-            'data': data,
-            'attrs': attrs.copy(),
-            'is_donor': attrs.get('is_donor', False),
-            'half_type': attrs.get('half', [None])[0] if 'half' in attrs else None,
-            'cut_by': attrs.get('cut_by', []),
-            'nested_in': attrs.get('nested_in', [])
-        }
-        return self
-    def add_cut_relation(self, cutting_uid, left_uid, right_uid):
-        """添加切割关系"""
-        # 记录哪个donor切割了哪对donor
-        if cutting_uid not in self.cut_relations:
-            self.cut_relations[cutting_uid] = []
-        cut_pair = (left_uid, right_uid)
-        if cut_pair not in self.cut_relations[cutting_uid]:
-            self.cut_relations[cutting_uid].append(cut_pair)
-        # 记录哪对donor被哪个donor切割
-        if cut_pair not in self.cut_by_relations:
-            self.cut_by_relations[cut_pair] = []
-        if cutting_uid not in self.cut_by_relations[cut_pair]:
-            self.cut_by_relations[cut_pair].append(cutting_uid)
-        # 更新半部分到完整donor的映射
-        self.half_to_whole[left_uid] = cut_pair
-        self.half_to_whole[right_uid] = cut_pair
-        return self
-    def add_nesting_relation(self, nested_uid, container_left_uid, container_right_uid):
-        """添加嵌套关系，记录donor嵌套在哪对donor中"""
-        container_key = (container_left_uid, container_right_uid)
-        # 获取被嵌套donor切割的donor对
-        cut_pairs = self.cut_relations.get(nested_uid, [])
-        for cut_pair in cut_pairs:
-            cut_left_uid, cut_right_uid = cut_pair
-            # 添加嵌套边
-            if container_key not in self.nesting_edges:
-                self.nesting_edges[container_key] = []
-            nested_triple = (cut_left_uid, cut_right_uid, nested_uid)
-            if nested_triple not in self.nesting_edges[container_key]:
-                self.nesting_edges[container_key].append(nested_triple)
-        return self
-    def build_from_donor_records(self, donor_records):
-        """从donor记录列表构建嵌套关系图"""
-        # 首先添加所有节点
-        for record in donor_records:
-            uid = record.annotations.get("uid")
-            if uid is not None:
-                self.add_node(uid, str(record.seq), record.annotations)
-        # 处理嵌套和切割关系
-        for record in donor_records:
-            uid = record.annotations.get("uid")
-            if uid is None:
-                continue
-            # 处理被切割的关系
-            if "cut_by" in record.annotations and "half" in record.annotations:
-                cut_by_list = record.annotations["cut_by"]
-                half_list = record.annotations["half"]
-                for i, (cutting_uid, half) in enumerate(zip(cut_by_list, half_list)):
-                    # 查找匹配的另一半
-                    opposite_half = "R" if half == "L" else "L"
-                    # 查找所有被同一个donor切割且是另一半的记录
-                    for other_record in donor_records:
-                        other_uid = other_record.annotations.get("uid")
-                        if other_uid == uid or other_uid is None:
-                            continue
-                        if "cut_by" not in other_record.annotations or "half" not in other_record.annotations:
-                            continue
-                        other_cut_by_list = other_record.annotations["cut_by"]
-                        other_half_list = other_record.annotations["half"]
-                        # 查找匹配的切割关系
-                        for j, (other_cutting_uid, other_half) in enumerate(zip(other_cut_by_list, other_half_list)):
-                            if other_cutting_uid == cutting_uid and other_half == opposite_half:
-                                # 找到匹配的一对，确定左右关系
-                                left_uid = uid if half == "L" else other_uid
-                                right_uid = other_uid if half == "L" else uid
-                                # 添加切割关系
-                                self.add_cut_relation(cutting_uid, left_uid, right_uid)
-            # 处理嵌套关系
-            if "nested_in" in record.annotations:
-                nested_pairs = record.annotations["nested_in"]
-                for container_pair in nested_pairs:
-                    container_left_uid, container_right_uid = container_pair
-                    self.add_nesting_relation(uid, container_left_uid, container_right_uid)
-        self.is_built = True
-        return self
-    def get_nested_donors(self, left_uid, right_uid):
-        """获取嵌套在指定donor对中的所有donor"""
-        container_key = (left_uid, right_uid)
-        return self.nesting_edges.get(container_key, [])
-    def get_cutting_donors(self, left_uid, right_uid):
-        """获取切割指定donor对的所有donor"""
-        container_key = (left_uid, right_uid)
-        return self.cut_by_relations.get(container_key, [])
-    def get_cut_pairs_by_donor(self, cutting_uid):
-        """获取被指定donor切割的所有donor对"""
-        return self.cut_relations.get(cutting_uid, [])
-    def reconstruct_donors(self, seq_id):
-        """重建所有可能的donor序列，返回重建结果和排除列表"""
-        if not self.is_built:
-            raise ValueError("图尚未构建，请先调用build_from_donor_records")
-        reconstructed_donors = []
-        excluded_uids = set()
-        # 处理所有切割关系
-        for container_key in self.nesting_edges:
-            # 递归重建
-            result, excluded = self._reconstruct_donor_recursive(container_key, seq_id)
-            if result:
-                reconstructed_donors.extend(result)
-                excluded_uids.update(excluded)
-        # 处理简单切割情况（未构成复杂嵌套的）
-        for cut_pair, cutting_uids in self.cut_by_relations.items():
-            left_uid, right_uid = cut_pair
-            # 跳过已处理的
-            if left_uid in excluded_uids or right_uid in excluded_uids:
-                continue
-            for cutting_uid in cutting_uids:
-                # 跳过已处理的
-                if cutting_uid in excluded_uids:
-                    continue
-                # 创建简单重建
-                result = self._create_simple_reconstruction(left_uid, right_uid, cutting_uid, seq_id)
-                if result:
-                    left_rec, right_rec, full_rec, clean_rec = result
-                    reconstructed_donors.extend([full_rec, clean_rec])
-                    excluded_uids.update([left_uid, right_uid, cutting_uid])
-        return reconstructed_donors, excluded_uids
-    def _reconstruct_donor_recursive(self, donor_key, seq_id, depth=0, visited=None):
-        """递归重建donor序列"""
-        if visited is None:
-            visited = set()
-        # 防止无限递归
-        if depth > 50 or donor_key in visited:
-            return [], set()
-        visited.add(donor_key)
-        left_uid, right_uid = donor_key
-        # 获取左右半部分数据
-        left_node = self.nodes.get(left_uid)
-        right_node = self.nodes.get(right_uid)
-        if not left_node or not right_node:
-            return [], set()
-        left_seq = left_node['data']
-        right_seq = right_node['data']
-        # 检查是否有嵌套的donor
-        nested_triples = self.get_nested_donors(left_uid, right_uid)
-        if not nested_triples:
-            # 基本情况：没有嵌套的donor，直接合并
-            clean_seq = left_seq + right_seq
-            clean_id = f"{seq_id}_clean_reconstructed_donor_{left_uid}_{right_uid}"
-            clean_rec = create_sequence_record(clean_seq, clean_id)
-            clean_rec.annotations["original_fragments"] = [left_uid, right_uid]
-            clean_rec.annotations["reconstruction_level"] = depth
-            return [clean_rec], {left_uid, right_uid}
-        # 复杂情况：有嵌套的donor
-        reconstructed_list = []
-        all_excluded = {left_uid, right_uid}
-        # 创建基本重建
-        clean_seq = left_seq + right_seq
-        clean_id = f"{seq_id}_clean_reconstructed_donor_{left_uid}_{right_uid}"
-        clean_rec = create_sequence_record(clean_seq, clean_id)
-        clean_rec.annotations["original_fragments"] = [left_uid, right_uid]
-        clean_rec.annotations["reconstruction_level"] = depth
-        reconstructed_list.append(clean_rec)
-        # 处理每个嵌套的donor
-        for nested_left_uid, nested_right_uid, cutting_uid in nested_triples:
-            # 获取切割donor
-            cutting_node = self.nodes.get(cutting_uid)
-            if not cutting_node:
-                continue
-            cutting_seq = cutting_node['data']
-            # 为每个嵌套donor创建完整重建
-            full_seq = left_seq + cutting_seq + right_seq
-            full_id = f"{seq_id}_full_reconstructed_donor_{left_uid}_{cutting_uid}_{right_uid}"
-            full_rec = create_sequence_record(full_seq, full_id)
-            full_rec.annotations["original_fragments"] = [left_uid, right_uid]
-            full_rec.annotations["cutting_donor"] = cutting_uid
-            full_rec.annotations["reconstruction_level"] = depth
-            reconstructed_list.append(full_rec)
-            # 递归重建嵌套donor
-            nested_key = (nested_left_uid, nested_right_uid)
-            nested_results, nested_excluded = self._reconstruct_donor_recursive(
-                nested_key, seq_id, depth+1, visited.copy()
-            )
-            for nested_rec in nested_results:
-                # 创建递归重建
-                recursive_seq = left_seq + str(nested_rec.seq) + right_seq
-                recursive_id = f"{seq_id}_recursive_reconstructed_{left_uid}_{cutting_uid}_{right_uid}_level{depth+1}"
-                recursive_rec = create_sequence_record(recursive_seq, recursive_id)
-                recursive_rec.annotations["original_fragments"] = [left_uid, right_uid]
-                recursive_rec.annotations["nested_reconstruction"] = nested_rec.id
-                recursive_rec.annotations["reconstruction_level"] = depth
-                reconstructed_list.append(recursive_rec)
-            all_excluded.update(nested_excluded)
-            all_excluded.add(cutting_uid)
-        return reconstructed_list, all_excluded
-    def _create_simple_reconstruction(self, left_uid, right_uid, cutting_uid, seq_id):
-        """创建简单的重建（不涉及复杂嵌套）"""
-        left_node = self.nodes.get(left_uid)
-        right_node = self.nodes.get(right_uid)
-        cutting_node = self.nodes.get(cutting_uid)
-        if not left_node or not right_node or not cutting_node:
-            return None
-        left_seq = left_node['data']
-        right_seq = right_node['data']
-        cutting_seq = cutting_node['data']
-        # 左半部分记录
-        left_id = f"{seq_id}_left_fragment_{left_uid}"
-        left_rec = create_sequence_record(left_seq, left_id)
-        left_rec.annotations["fragment_type"] = "left"
-        left_rec.annotations["original_uid"] = left_uid
-        # 右半部分记录
-        right_id = f"{seq_id}_right_fragment_{right_uid}"
-        right_rec = create_sequence_record(right_seq, right_id)
-        right_rec.annotations["fragment_type"] = "right"
-        right_rec.annotations["original_uid"] = right_uid
-        # 完整重建（含切割donor）
-        full_seq = left_seq + cutting_seq + right_seq
-        full_id = f"{seq_id}_reconstructed_donor_{left_uid}_{cutting_uid}_{right_uid}"
-        full_rec = create_sequence_record(full_seq, full_id)
-        full_rec.annotations["original_fragments"] = [left_uid, right_uid]
-        full_rec.annotations["cutting_donor"] = cutting_uid
-        # 干净重建（不含切割donor）
-        clean_seq = left_seq + right_seq
-        clean_id = f"{seq_id}_clean_reconstructed_donor_{left_uid}_{right_uid}"
-        clean_rec = create_sequence_record(clean_seq, clean_id)
-        clean_rec.annotations["original_fragments"] = [left_uid, right_uid]
-        return left_rec, right_rec, full_rec, clean_rec
-    def to_graphviz(self, prefix="donor_graph"):
-        """生成Graphviz DOT格式可视化"""
-        lines = ["digraph DonorNestingGraph {", 
-                 "  bgcolor=\"#FFFFFF\";", 
-                 "  node [shape=box, style=filled, fontsize=10];"]
-        # 添加节点
-        for uid, node in self.nodes.items():
-            node_type = "Donor" if node.get('is_donor', False) else "Fragment"
-            half_info = f" ({node.get('half_type', '')})" if node.get('half_type') else ""
-            label = f"{node_type}{half_info}\\nUID: {uid}\\nLen: {len(node['data'])}"
-            color = "#AAFFAA"  # 默认绿色
-            if node.get('is_donor', False):
-                color = "#AAAAFF"  # donor蓝色
-            if node.get('half_type'):
-                color = "#FFAAAA"  # 半部分红色
-            lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
-        # 添加切割边
-        for cutting_uid, cut_pairs in self.cut_relations.items():
-            for left_uid, right_uid in cut_pairs:
-                lines.append(f'  node_{cutting_uid} -> node_{left_uid} [label="cuts L", color="red"];')
-                lines.append(f'  node_{cutting_uid} -> node_{right_uid} [label="cuts R", color="red"];')
-                # 添加半部分之间的关系
-                lines.append(f'  node_{left_uid} -> node_{right_uid} [label="pair", style="dashed", color="blue"];')
-        # 添加嵌套边
-        for container_key, nested_triples in self.nesting_edges.items():
-            container_left_uid, container_right_uid = container_key
-            for nested_left_uid, nested_right_uid, cutting_uid in nested_triples:
-                lines.append(f'  node_{cutting_uid} -> node_{container_left_uid} [label="nested in", color="green"];')
-                lines.append(f'  node_{cutting_uid} -> node_{container_right_uid} [label="nested in", color="green"];')
-        lines.append("}")
-        return "\n".join(lines)
 
 def main():
     """Main function to handle command line arguments and execute the program."""
@@ -1930,8 +1672,6 @@ def main():
                        help="Enable Target Site Duplication (TSD) with specified length. When a donor sequence is inserted, TSD of this length will be generated at the insertion site.")
     flag_group.add_argument("--visual", action="store_true",
                        help="Generate Graphviz DOT files visualizing the tree structure of each sequence. Files will be named {seqid}_tree_visual.dot and saved in the output directory.")
-    flag_group.add_argument("--recursive", action="store_true",
-                       help="Use recursive insertion method instead of iterative one.")
 
     parsed_args = parser.parse_args()
 
@@ -1948,7 +1688,6 @@ def main():
         flag_track=parsed_args.track,
         tsd_length=parsed_args.tsd,
         flag_visual=parsed_args.visual,
-        flag_recursive=parsed_args.recursive,
         iteration=parsed_args.iteration
     )
     generator.execute()
