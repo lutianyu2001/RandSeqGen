@@ -1209,8 +1209,40 @@ class DonorNestingGraph:
                  "  bgcolor=\"#FFFFFF\";", 
                  "  node [shape=box, style=filled, fontsize=10];"]
                  
-        # 添加所有节点
-        for uid, info in self.nodes.items():
+        # 获取有关系的节点UID列表
+        related_uids = set()
+        
+        # 添加所有参与嵌套关系的节点
+        for container_uid, nested_list in self.nestings.items():
+            related_uids.add(container_uid)
+            related_uids.update(nested_list)
+            
+        # 添加所有参与切割关系的节点
+        for cutter_uid, cut_list in self.cuts.items():
+            related_uids.add(cutter_uid)
+            for cut_uid, left_uid, right_uid in cut_list:
+                related_uids.update([cut_uid, left_uid, right_uid])
+                
+        # 添加所有片段节点
+        related_uids.update(self.fragments.keys())
+        
+        # 添加所有在cut_by中的节点
+        for cut_uid in self.cut_by:
+            related_uids.add(cut_uid)
+            for cutter_uid, left_uid, right_uid in self.cut_by[cut_uid]:
+                related_uids.update([cutter_uid, left_uid, right_uid])
+                
+        # 添加所有在nested_in中的节点
+        for nested_uid in self.nested_in:
+            related_uids.add(nested_uid)
+            related_uids.update(self.nested_in[nested_uid])
+                 
+        # 添加所有有关系的节点
+        for uid in related_uids:
+            if uid not in self.nodes:
+                continue
+                
+            info = self.nodes[uid]
             node_type = "Donor"
             fragment_info = ""
             if self.is_fragment(uid):
