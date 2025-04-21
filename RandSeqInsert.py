@@ -892,7 +892,13 @@ class SequenceTree:
         # Process fragment and nesting information
         nested_in = ""
         cut_half = ""
-
+        
+        # 重新设计颜色赋值逻辑，使其更加明确
+        # 1. 先设置基础颜色（donor为蓝色，acceptor为绿色）
+        # 2. 如果是切割片段，改为粉色
+        # 3. 如果有嵌套关系，改为黄色
+        # 4. 如果同时满足2和3，则为紫色
+        
         # Check if this is a fragment of a cut donor
         if self.nesting_graph.is_fragment(node.uid):
             # Get fragment info (original_uid, position, is_left)
@@ -907,11 +913,10 @@ class SequenceTree:
         containers = self.nesting_graph.get_containers(node.uid)
         if containers:
             nested_in = "Nest: " + ','.join(map(str, containers)) + "\\n"
-            fill_color = "yellow"  # Nested nodes shown in yellow
-
-        # If both nested and cut, use a distinctive color
-        if nested_in and cut_half:
-            fill_color = "plum"
+            if cut_half:  # 如果既是切割片段又有嵌套关系
+                fill_color = "plum"
+            else:  # 如果只有嵌套关系
+                fill_color = "yellow"  # Nested nodes shown in yellow
 
         # Create node label with position information
         label = "".join([node_type, " | ", str(node.uid), "\\n",
@@ -920,6 +925,14 @@ class SequenceTree:
                         "Length: ", str(node.length), "\\n",
                         nested_in,
                         cut_half])
+
+        # 显示短序列（如果太长则截断）
+        if node.length <= 10:
+            seq_display = node.data
+        else:
+            seq_display = node.data[:5] + "..." + node.data[-5:]
+            
+        label += f"Seq: {seq_display}\\n"
 
         # Add the node to the nodes list
         nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
@@ -1220,27 +1233,39 @@ class DonorNestingGraph:
             if donor_id:
                 label += f"\\nID: {donor_id}"
             label += fragment_info
-
-            # 设置颜色
-            color = "#AAFFAA"  # 默认绿色
+            
+            # 设置颜色 - 遵循与SequenceTree中相同的颜色逻辑
+            # 1. 默认donor为蓝色，其他为绿色
+            # 2. 切割片段为粉色
+            # 3. 有嵌套关系为黄色
+            # 4. 同时满足2和3为紫色
+            color = "#AAAAFF" if node_type == "Donor" else "#AAFFAA"  # donor为蓝色，其他为绿色
+            
+            # 检查是否为切割片段
             if fragment_info:
-                color = "#FFAAAA"  # 片段为红色
-            elif node_type == "Donor":
-                color = "#AAAAFF"  # donor为蓝色
+                color = "#FFAAAA"  # 切割片段为粉色
+            
+            # 检查是否有嵌套关系
+            has_nesting = uid in self.nested_in and self.nested_in[uid]
+            if has_nesting:
+                if fragment_info:  # 既有嵌套又是切割片段
+                    color = "#FFAAFF"  # 紫色(plum)
+                else:  # 只有嵌套关系
+                    color = "#FFFF77"  # 黄色
 
             lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
 
         # 添加嵌套关系边
         for container_uid, nested_list in self.nestings.items():
             for nested_uid in nested_list:
-                lines.append(f'  node_{container_uid} -> node_{nested_uid} [label="contains", color="green"];')
-
+                lines.append(f'  node_{container_uid} -> node_{nested_uid} [label="contains", color="green", penwidth=2.0];')
+                
         # 添加切割关系边
         for cutter_uid, cut_list in self.cuts.items():
             for cut_uid, left_uid, right_uid in cut_list:
-                lines.append(f'  node_{cutter_uid} -> node_{cut_uid} [label="cuts", color="red"];')
-                lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="left", style="dashed", color="blue"];')
-                lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="right", style="dashed", color="blue"];')
+                lines.append(f'  node_{cutter_uid} -> node_{cut_uid} [label="cuts", color="red", penwidth=2.0];')
+                lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="left_frag", style="dashed", color="blue"];')
+                lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="right_frag", style="dashed", color="blue"];')
 
         lines.append("}")
         return '\n'.join(lines)
