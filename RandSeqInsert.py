@@ -364,7 +364,7 @@ class SequenceTree:
         self.node_dict[uid] = node
         return node
 
-    def insert(self, abs_position: int, donor_seq: str, donor_id: str = None, tsd_length: int = 0) -> None:
+    def insert(self, abs_position: int, donor_seq: str, donor_id: str = None, tsd_length: int = 0, recursive: bool = False) -> None:
         """
         Insert a donor sequence at the specified position.
 
@@ -373,6 +373,7 @@ class SequenceTree:
             donor_seq (str): Donor sequence to insert
             donor_id (str): Identifier for the donor sequence
             tsd_length (int): Length of Target Site Duplication (TSD) to generate
+            recursive (bool): Whether to use recursive insertion method
         """
         # Skip insertion if donor sequence is empty
         if not donor_seq:
@@ -380,7 +381,167 @@ class SequenceTree:
 
         # Convert 1-based position to 0-based for internal processing
         zero_based_position = abs_position - 1
-        self.root = self._insert_iterative(self.root, zero_based_position, donor_seq, donor_id, tsd_length)
+        
+        if recursive:
+            self.root = self._insert_recursive(self.root, zero_based_position, donor_seq, donor_id, tsd_length)
+        else:
+            self.root = self._insert_iterative(self.root, zero_based_position, donor_seq, donor_id, tsd_length)
+
+    def _insert_recursive(self, node: SequenceNode, abs_position: int, donor_seq: str, 
+                      donor_id: str = None, tsd_length: int = 0) -> SequenceNode:
+        """
+        Recursively insert a donor sequence at the absolute position in the tree.
+
+        Args:
+            node (SequenceNode): Current node
+            abs_position (int): Absolute position in the tree to insert at (0-based)
+            donor_seq (str): Donor sequence to insert
+            donor_id (str): Identifier for the donor sequence
+            tsd_length (int): Length of Target Site Duplication (TSD) to generate
+
+        Returns:
+            SequenceNode: New node after insertion
+        """
+        # Skip insertion if donor sequence is empty
+        if not donor_seq:
+            return node
+
+        # 创建donor节点并添加到嵌套关系图
+        donor_node_uid = self._get_next_uid()  # 提前创建UID以在关系图中使用
+        self.nesting_graph.add_node(donor_node_uid, donor_seq, donor_id, abs_position)
+
+        # Calculate positions in tree
+        left_length = node.left.total_length if node.left else 0
+
+        # Case 1: Position is in the current node's left subtree
+        if abs_position <= left_length:
+            if node.left:
+                node.left = self._insert_recursive(node.left, abs_position, donor_seq, donor_id, tsd_length)
+            else:
+                # Insert as left child
+                new_donor = self._create_node(donor_seq, True, donor_id)
+                new_donor.uid = donor_node_uid  # 使用预先创建的UID
+                self.node_dict[donor_node_uid] = new_donor
+                node.left = new_donor
+                
+                # 如果当前节点是donor，记录嵌套关系
+                if node.is_donor:
+                    self.nesting_graph.add_nesting_relation(node.uid, donor_node_uid)
+                    
+            node.update()
+            return node.balance()
+
+        # Case 2: Position is inside the current node
+        node_start = left_length
+        node_end = node_start + node.length
+        if node_start < abs_position < node_end:
+            # Split this node
+            rel_pos = abs_position - node_start
+            left_data = node.data[:rel_pos]
+            right_data = node.data[rel_pos:]
+
+            # Handle TSD generation
+            tsd_5 = tsd_3 = ""
+            if tsd_length > 0:
+                # Extract source TSD sequence from the original sequence
+                source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
+
+                # Generate TSD sequences (potentially with mutations)
+                tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
+
+                # Remove source TSD from right_data as it will be duplicated
+                if len(source_tsd_seq) > 0:
+                    right_data = right_data[len(source_tsd_seq):]
+
+                # Add TSD sequences to the left and right data
+                left_data = left_data + tsd_5
+                right_data = tsd_3 + right_data
+
+            # 确定当前节点是否是donor
+            is_current_donor = node.is_donor
+            current_donor_id = node.donor_id
+
+            # 创建左、右片段节点
+            left_node_uid = self._get_next_uid()
+            right_node_uid = self._get_next_uid()
+            
+            # 添加左右片段节点到关系图
+            self.nesting_graph.add_node(left_node_uid, left_data, current_donor_id, node_start)
+            self.nesting_graph.add_node(right_node_uid, right_data, current_donor_id, abs_position + len(donor_seq))
+
+            # Create new left child with left data
+            new_left = self._create_node(left_data, is_current_donor, current_donor_id)
+            new_left.uid = left_node_uid
+            self.node_dict[left_node_uid] = new_left
+            
+            if node.left:
+                new_left.left = node.left
+                new_left.update()
+                # Balance left subtree
+                new_left = new_left.balance()
+
+            # Create new right child with right data and original right child
+            new_right = self._create_node(right_data, is_current_donor, current_donor_id)
+            new_right.uid = right_node_uid
+            self.node_dict[right_node_uid] = new_right
+            
+            if node.right:
+                new_right.right = node.right
+                new_right.update()
+                # Balance right subtree
+                new_right = new_right.balance()
+
+            # 如果当前节点是donor，记录切割关系
+            if is_current_donor:
+                # 添加切割关系到嵌套关系图
+                self.nesting_graph.add_cut_relation(
+                    donor_node_uid,  # 切割者donor的UID
+                    node.uid,        # 被切割donor的UID
+                    left_node_uid,   # 切割后左片段的UID
+                    right_node_uid   # 切割后右片段的UID
+                )
+                
+                # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
+                containers = self.nesting_graph.get_containers(node.uid)
+                for container_uid in containers:
+                    # 将嵌套关系从父节点转移到两个片段
+                    self.nesting_graph.add_nesting_relation(container_uid, left_node_uid)
+                    self.nesting_graph.add_nesting_relation(container_uid, right_node_uid)
+            
+            # Replace current node's data with the donor sequence
+            node.data = donor_seq
+            node.length = len(donor_seq)
+            node.is_donor = True
+            node.donor_id = donor_id
+            node.uid = donor_node_uid
+            self.node_dict[donor_node_uid] = node
+
+            # Set new children
+            node.left = new_left
+            node.right = new_right
+            node.update()
+
+            return node.balance()
+
+        # Case 3: Position is in the current node's right subtree
+        if abs_position >= node_end:
+            if node.right:
+                node.right = self._insert_recursive(node.right, abs_position - node_end, donor_seq, donor_id, tsd_length)
+            else:
+                # Insert as right child
+                new_donor = self._create_node(donor_seq, True, donor_id)
+                new_donor.uid = donor_node_uid  # 使用预先创建的UID
+                self.node_dict[donor_node_uid] = new_donor
+                node.right = new_donor
+                
+                # 如果当前节点是donor，记录嵌套关系
+                if node.is_donor:
+                    self.nesting_graph.add_nesting_relation(node.uid, donor_node_uid)
+                    
+            node.update()
+            return node.balance()
+
+        raise RuntimeError("[ERROR] Should not reach here")
 
     def _insert_iterative(self, node: SequenceNode, abs_position: int, donor_seq: str, 
                           donor_id: str = None, tsd_length: int = 0) -> SequenceNode:
@@ -570,7 +731,7 @@ class SequenceTree:
             # Balance parent node
             current = parent.balance()
 
-        return current if not parent_stack else node.balance()
+        return current
 
     def donors(self, seq_id: str) -> Tuple[List[SeqRecord], List[SeqRecord]]:
         """
@@ -950,7 +1111,15 @@ class DonorNestingGraph:
         return self.cuts.get(cutter_uid, [])
     
     def reconstruct_donors(self, seq_id: str) -> tuple:
-        """基于嵌套和切割关系重建donor序列"""
+        """
+        基于嵌套和切割关系重建donor序列
+        
+        Args:
+            seq_id: 序列标识符，用于构建输出记录ID
+            
+        Returns:
+            tuple: (重建的donor记录列表, 排除的UID集合)
+        """
         reconstructed = []
         excluded = set()
         processed_fragments = set()
@@ -973,8 +1142,9 @@ class DonorNestingGraph:
         
         # 按照处理顺序排序，确保先处理深层片段
         fragments_to_process = sorted(list(processed_fragments), 
-                                    key=lambda uid: -len(self.cut_by.get(uid, [])))
+                                key=lambda uid: -len(self.cut_by.get(uid, [])))
         
+        # 处理所有片段
         for fragment_uid in fragments_to_process:
             if fragment_uid in excluded:
                 continue
@@ -984,33 +1154,48 @@ class DonorNestingGraph:
                 if any(uid in excluded for uid in [fragment_uid, cutter_uid, left_uid, right_uid]):
                     continue
                     
+                # 检查我们是否有所有需要的节点数据
+                if not all(uid in self.nodes for uid in [fragment_uid, cutter_uid, left_uid, right_uid]):
+                    continue
+                
                 # 获取序列数据
-                left_seq = self.nodes[left_uid]['sequence']
-                right_seq = self.nodes[right_uid]['sequence']
-                cutter_seq = self.nodes[cutter_uid]['sequence']
+                try:
+                    left_seq = self.nodes[left_uid]['sequence']
+                    right_seq = self.nodes[right_uid]['sequence']
+                    cutter_seq = self.nodes[cutter_uid]['sequence']
+                except KeyError:
+                    continue
                 
-                # 创建两种重建版本
+                # 重建两种形式的donor：带切割donor和不带切割donor
+                
+                # 1. 包含切割donor的完整重建
                 full_seq = left_seq + cutter_seq + right_seq
-                clean_seq = left_seq + right_seq
-                
-                # 添加重建记录
                 full_id = f"{seq_id}_reconstructed_{fragment_uid}_{cutter_uid}"
-                clean_id = f"{seq_id}_clean_reconstructed_{fragment_uid}"
-                
                 full_rec = create_sequence_record(full_seq, full_id)
                 full_rec.annotations["reconstruction_type"] = "full"
                 full_rec.annotations["original_uid"] = fragment_uid
                 full_rec.annotations["cutter_uid"] = cutter_uid
+                full_rec.annotations["left_uid"] = left_uid
+                full_rec.annotations["right_uid"] = right_uid
+                full_rec.annotations["reconstruction_depth"] = fragments_to_process.index(fragment_uid)
+                reconstructed.append(full_rec)
                 
+                # 2. 不包含切割donor的清洁重建
+                clean_seq = left_seq + right_seq
+                clean_id = f"{seq_id}_clean_reconstructed_{fragment_uid}"
                 clean_rec = create_sequence_record(clean_seq, clean_id)
                 clean_rec.annotations["reconstruction_type"] = "clean"
                 clean_rec.annotations["original_uid"] = fragment_uid
+                clean_rec.annotations["left_uid"] = left_uid
+                clean_rec.annotations["right_uid"] = right_uid
+                clean_rec.annotations["reconstruction_depth"] = fragments_to_process.index(fragment_uid)
+                reconstructed.append(clean_rec)
                 
-                reconstructed.extend([full_rec, clean_rec])
+                # 添加到排除集
                 excluded.update([fragment_uid, cutter_uid, left_uid, right_uid])
-                
+        
         return reconstructed, excluded
-
+    
     def to_graphviz(self, prefix: str = "donor_graph") -> str:
         """
         生成Graphviz DOT格式可视化
@@ -1324,7 +1509,8 @@ class SeqGenerator:
     def __init__(self, input_file: str, insertion: Union[str, int], batch: int, processors: int, output_dir_path: str,
                  donor_lib: Optional[List[str]] = None, donor_lib_weight: Optional[List[float]] = None,
                  donor_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
-                 tsd_length: Optional[int] = None, flag_visual: bool = False, iteration: int = 1):
+                 tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False, 
+                 iteration: int = 1):
         """
         Initialize the sequence generator.
 
@@ -1353,6 +1539,7 @@ class SeqGenerator:
         self.flag_track: bool = flag_track
         self.tsd_length: Optional[int] = tsd_length
         self.flag_visual: bool = flag_visual
+        self.flag_recursive: bool = flag_recursive
         self.iteration: int = iteration
 
         # Load input sequence
@@ -1395,6 +1582,8 @@ class SeqGenerator:
             print(f"TSD settings: Generating TSD of length {self.tsd_length} at insertion sites")
         print(f"Donor library: {len(self.donor_sequences)} sequences loaded")
         print(f"Generating {self.batch} independent result file(s)")
+        if self.flag_recursive:
+            print(f"Using recursive insertion method")
         if self.flag_visual:
             print(f"Tree visualization enabled: DOT files will be generated for each sequence")
 
@@ -1495,7 +1684,7 @@ class SeqGenerator:
 
             # Insert donors into the tree
             for pos, donor_seq in zip(insert_positions, selected_donors):
-                seq_tree.insert(pos, donor_seq, None, self.tsd_length)
+                seq_tree.insert(pos, donor_seq, None, self.tsd_length, self.flag_recursive)
 
         # Collect donor sequences once after all iterations if tracking is enabled
         if self.flag_track:
@@ -1672,6 +1861,8 @@ def main():
                        help="Enable Target Site Duplication (TSD) with specified length. When a donor sequence is inserted, TSD of this length will be generated at the insertion site.")
     flag_group.add_argument("--visual", action="store_true",
                        help="Generate Graphviz DOT files visualizing the tree structure of each sequence. Files will be named {seqid}_tree_visual.dot and saved in the output directory.")
+    flag_group.add_argument("--recursive", action="store_true",
+                       help="Use recursive insertion method instead of iterative one.")
 
     parsed_args = parser.parse_args()
 
@@ -1688,6 +1879,7 @@ def main():
         flag_track=parsed_args.track,
         tsd_length=parsed_args.tsd,
         flag_visual=parsed_args.visual,
+        flag_recursive=parsed_args.recursive,
         iteration=parsed_args.iteration
     )
     generator.execute()
