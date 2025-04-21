@@ -859,7 +859,7 @@ class SequenceTree:
 
         Args:
             node (SequenceNode): Current node
-            node_id_prefix (str): Prefix for node IDs 
+            node_id_prefix (str): Prefix for node IDs (not used when using uid as node ID)
             abs_pos (int): Current absolute position (0-based)
 
         Returns:
@@ -889,42 +889,37 @@ class SequenceTree:
         node_type = "Donor" if node.is_donor else "Acceptor"
         fill_color = "lightblue" if node.is_donor else "lightgreen"
         
-        # 检查是否被切割
-        is_fragment = self.nesting_graph.is_fragment(node.uid)
-        if is_fragment:
-            orig_uid = self.nesting_graph.get_original_donor(node.uid)
-            frag_info = f"Fragment of {orig_uid}"
-            fill_color = "lightpink"  # 被切割的donor显示为粉色
-        else:
-            frag_info = ""
-            
-        # 检查是否有嵌套关系
-        nested_donors = self.nesting_graph.get_nested_donors(node.uid)
-        nested_in = self.nesting_graph.get_containers(node.uid)
+        # Process fragment and nesting information
+        nested_in = ""
+        cut_half = ""
         
-        if nested_donors and nested_in:
-            # 既被嵌套又有嵌套的节点
+        # Check if this is a fragment of a cut donor
+        if self.nesting_graph.is_fragment(node.uid):
+            # Get fragment info (original_uid, position, is_left)
+            fragment_info = self.nesting_graph.fragments.get(node.uid)
+            if fragment_info:
+                orig_uid, _, is_left = fragment_info
+                half_type = "L" if is_left else "R"
+                cut_half = f"Cut: {half_type}\\n"
+                fill_color = "lightpink"  # Cut fragments shown in pink
+        
+        # Check for nesting relationships
+        containers = self.nesting_graph.get_containers(node.uid)
+        if containers:
+            nested_in = "Nest: " + ','.join(map(str, containers)) + "\\n"
+            fill_color = "yellow"  # Nested nodes shown in yellow
+        
+        # If both nested and cut, use a distinctive color
+        if nested_in and cut_half:
             fill_color = "plum"
-        elif nested_donors:
-            # 含有嵌套donor的节点
-            fill_color = "yellow"
-        elif nested_in:
-            # 被嵌套在其他donor中的节点
-            fill_color = "orange"
 
         # Create node label with position information
         label = "".join([node_type, " | ", str(node.uid), "\\n",
-                         str(start_pos_1based), "-", str(end_pos_1based), "\\n",
-                         "Length: ", str(node.length), "\\n"])
-                         
-        if frag_info:
-            label += frag_info + "\\n"
-            
-        if nested_donors:
-            label += f"Contains: {len(nested_donors)} donors\\n"
-            
-        if nested_in:
-            label += f"Nested in: {len(nested_in)} donors\\n"
+                        str(start_pos_1based), "\\l",
+                        str(end_pos_1based), "\\l",
+                        "Length: ", str(node.length), "\\n",
+                        nested_in,
+                        cut_half])
 
         # Add the node to the nodes list
         nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
