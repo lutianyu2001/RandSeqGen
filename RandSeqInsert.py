@@ -87,35 +87,35 @@ def add_indel_mutation(seq: str) -> str:
         pos = random.randrange(len(seq))
         return seq[:pos] + seq[pos+1:]
 
-def generate_TSD(seq_slice: str,
-                 length: int = float("inf"),
-                 snp: float = DEFAULT_TSD_SNP_MUTATION_RATE,
-                 indel: float = DEFAULT_TSD_INDEL_MUTATION_RATE) -> Tuple[str, str]:
+def generate_TSD(seq_slice_right: str,
+                 length: Optional[int] = None,
+                 snp_mutation_rate: float = DEFAULT_TSD_SNP_MUTATION_RATE,
+                 indel_mutation_rate: float = DEFAULT_TSD_INDEL_MUTATION_RATE) -> Tuple[str, str]:
     """Generate TSD sequences with potential mutations.
 
     Args:
-        seq_slice (str): Acceptor sequence fragment
-        length (int): TSD length (defaults to seq_slice length)
-        snp (float): SNP mutation probability
-        indel (float): Indel mutation probability
+        seq_slice_right (str): sequence fragment on right side (3' direction)
+        length (int): TSD length (defaults to seq_slice_right length)
+        snp_mutation_rate (float): SNP mutation probability
+        indel_mutation_rate (float): InDel mutation probability
 
     Returns:
         Tuple[str, str]: (5' TSD sequence, 3' TSD sequence)
     """
     # Initialize both ends of TSD
-    tsd_length = min(len(seq_slice), length)
-    tsd_5 = tsd_3 = seq_slice[:tsd_length]
+    tsd_length = min(len(seq_slice_right), length or len(seq_slice_right))
+    tsd_5 = tsd_3 = seq_slice_right[:tsd_length]
 
-    # Apply SNP mutation (randomly choose end)
-    if random.random() < snp:
-        if random.choice([True, False]):
+    # Apply SNP mutation
+    if random.random() < snp_mutation_rate:
+        if random.random() < 0.5:
             tsd_5 = add_snp_mutation(tsd_5)
         else:
             tsd_3 = add_snp_mutation(tsd_3)
 
-    # Apply Indel mutation (randomly choose end)
-    if random.random() < indel:
-        if random.choice([True, False]):
+    # Apply InDel mutation
+    if random.random() < indel_mutation_rate:
+        if random.random() < 0.5:
             tsd_5 = add_indel_mutation(tsd_5)
         else:
             tsd_3 = add_indel_mutation(tsd_3)
@@ -154,9 +154,9 @@ class SequenceNode:
 
     def __iter__(self):
         """
-        实现对树的中序遍历，以左-根-右的顺序迭代所有节点
+        Implement in-order traversal of the tree, iterating all nodes in left-root-right order
         Yields:
-            SequenceNode: 树中的每个节点
+            SequenceNode: Each node in the tree
         """
         yield from SequenceNode._inorder_traversal(self)
 
@@ -200,7 +200,7 @@ class SequenceNode:
         self.update_height()
         self.update_total_length()
 
-    def get_balance(self):
+    def _get_balance_factor(self):
         """
         Calculate the balance factor of this node.
 
@@ -258,11 +258,8 @@ class SequenceNode:
         Returns:
             SequenceNode: The new root after balancing
         """
-        # Update height
         self.update_height()
-
-        # Get balance factor
-        balance = self.get_balance()
+        balance = self._get_balance_factor()
 
         # Left-Left case
         if balance > 1 and (self.left and self.__get_left_balance() >= 0):
@@ -286,11 +283,11 @@ class SequenceNode:
 
     def __get_left_balance(self):
         """Get balance factor of left child"""
-        return self.left.get_balance() if self.left else 0
+        return self.left._get_balance_factor() if self.left else 0
 
     def __get_right_balance(self):
         """Get balance factor of right child"""
-        return self.right.get_balance() if self.right else 0
+        return self.right._get_balance_factor() if self.right else 0
 
 
 class SequenceTree:
@@ -381,11 +378,11 @@ class SequenceTree:
 
         # Convert 1-based position to 0-based for internal processing
         zero_based_position = abs_position - 1
-        
-        if recursive:
-            self.root = self._insert_recursive(self.root, zero_based_position, donor_seq, donor_id, tsd_length)
-        else:
+
+        if not recursive:
             self.root = self._insert_iterative(self.root, zero_based_position, donor_seq, donor_id, tsd_length)
+        else:
+            self.root = self._insert_recursive(self.root, zero_based_position, donor_seq, donor_id, tsd_length)
 
     def _insert_recursive(self, node: SequenceNode, abs_position: int, donor_seq: str, 
                       donor_id: str = None, tsd_length: int = 0) -> SequenceNode:
@@ -411,10 +408,11 @@ class SequenceTree:
         self.nesting_graph.add_node(donor_node_uid, donor_seq, donor_id, abs_position)
 
         # Calculate positions in tree
-        left_length = node.left.total_length if node.left else 0
+        node_start = node.left.total_length if node.left else 0
+        node_end = node_start + node.length
 
         # Case 1: Position is in the current node's left subtree
-        if abs_position <= left_length:
+        if abs_position <= node_start:
             if node.left:
                 node.left = self._insert_recursive(node.left, abs_position, donor_seq, donor_id, tsd_length)
             else:
@@ -432,8 +430,6 @@ class SequenceTree:
             return node.balance()
 
         # Case 2: Position is inside the current node
-        node_start = left_length
-        node_end = node_start + node.length
         if node_start < abs_position < node_end:
             # Split this node
             rel_pos = abs_position - node_start
@@ -572,12 +568,11 @@ class SequenceTree:
 
         # Iteratively find insertion position
         while True:
-            left_length = current.left.total_length if current.left else 0
-            node_start = left_length
+            node_start = current.left.total_length if current.left else 0
             node_end = node_start + current.length
 
             # Case 1: Position is in the current node's left subtree
-            if abs_position <= left_length:
+            if abs_position <= node_start:
                 if current.left:
                     # Record parent node and direction for backtracking
                     parent_stack.append(current)
@@ -1120,13 +1115,14 @@ class DonorNestingGraph:
         Returns:
             tuple: (重建的donor记录列表, 排除的UID集合)
         """
+        MAX_RECURSION_DEPTH = 50
         reconstructed = []
         excluded = set()
         processed_fragments = set()
         
         # 首先查找所有需要递归重建的片段
         def process_fragment_tree(fragment_uid, depth=0):
-            if fragment_uid in processed_fragments or depth > 50:
+            if fragment_uid in processed_fragments or depth > MAX_RECURSION_DEPTH:
                 return
             processed_fragments.add(fragment_uid)
             
@@ -1142,7 +1138,7 @@ class DonorNestingGraph:
         
         # 按照处理顺序排序，确保先处理深层片段
         fragments_to_process = sorted(list(processed_fragments), 
-                                key=lambda uid: -len(self.cut_by.get(uid, [])))
+                                key=lambda uid: len(self.cut_by.get(uid, [])), reverse=True)
         
         # 处理所有片段
         for fragment_uid in fragments_to_process:
