@@ -32,7 +32,7 @@ PROGRAM_ROOT_DIR_ABS_PATH = os.path.dirname(__file__)
 DEFAULT_TSD_SNP_MUTATION_RATE = 0.05
 DEFAULT_TSD_INDEL_MUTATION_RATE = 0.05
 
-TREE_VISUAL_DIR_NAME = "tree_visual"
+VISUAL_DIR_NAME = "visualization"
 DEFAULT_ALLOCATED_CPU_CORES = os.cpu_count() - 2 if os.cpu_count() > 2 else 1
 
 DEFAULT_OUTPUT_DIR_REL_PATH = "RandSeqInsert-Result"
@@ -497,6 +497,10 @@ class SequenceTree:
                     right_node_uid   # 切割后右片段的UID
                 )
                 
+                # 将切割者donor添加为两个片段的容器（建立嵌套关系）
+                self.nesting_graph.add_nesting_relation(donor_node_uid, left_node_uid)
+                self.nesting_graph.add_nesting_relation(donor_node_uid, right_node_uid)
+                
                 # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
                 containers = self.nesting_graph.get_containers(node.uid)
                 for container_uid in containers:
@@ -655,6 +659,10 @@ class SequenceTree:
                         left_node_uid,   # 切割后左片段的UID
                         right_node_uid   # 切割后右片段的UID
                     )
+                    
+                    # 将切割者donor添加为两个片段的容器（建立嵌套关系）
+                    self.nesting_graph.add_nesting_relation(donor_node_uid, left_node_uid)
+                    self.nesting_graph.add_nesting_relation(donor_node_uid, right_node_uid)
                     
                     # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
                     containers = self.nesting_graph.get_containers(current.uid)
@@ -1187,7 +1195,7 @@ class DonorNestingGraph:
         
         return reconstructed, excluded
     
-    def to_graphviz(self, prefix: str = "donor_graph") -> str:
+    def to_graphviz_dot(self, prefix: str = "donor_graph") -> str:
         """
         生成Graphviz DOT格式可视化
         
@@ -1211,7 +1219,15 @@ class DonorNestingGraph:
                 fragment_info = f"\\nFragment of {orig_uid} ({side})"
                 node_type = "Fragment"
                 
-            label = f"{node_type}\\nUID: {uid}\\nLen: {info['length']}{fragment_info}"
+            # 安全获取节点长度
+            length = info.get('length', 0)
+            donor_id = info.get('donor_id', '')
+            
+            # 创建标签，包含donor_id信息
+            label = f"{node_type}\\nUID: {uid}\\nLen: {length}"
+            if donor_id:
+                label += f"\\nID: {donor_id}"
+            label += fragment_info
             
             # 设置颜色
             color = "#AAFFAA"  # 默认绿色
@@ -1576,7 +1592,7 @@ class SeqGenerator:
         if self.flag_recursive:
             print(f"Using recursive insertion method")
         if self.flag_visual:
-            print(f"Tree visualization enabled: DOT files will be generated for each sequence")
+            print(f"Tree and Graph visualization enabled")
 
     def __pre_check(self):
         """
@@ -1693,12 +1709,21 @@ class SeqGenerator:
 
         # Generate visualization if requested
         if self.flag_visual:
+            # Generate tree visualization
             graphviz_str = seq_tree.to_graphviz_dot(node_id_prefix=seq_record.id)
-            visual_dir_path = os.path.join(self.output_dir_path, TREE_VISUAL_DIR_NAME)
-            os.makedirs(visual_dir_path, exist_ok=True)
-            with open(os.path.join(visual_dir_path, f"{seq_record.id}_tree_visual.dot"), "w") as f:
+            tree_visual_dir_path = os.path.join(self.output_dir_path, VISUAL_DIR_NAME)
+            os.makedirs(tree_visual_dir_path, exist_ok=True)
+            with open(os.path.join(tree_visual_dir_path, f"{seq_record.id}_tree_visual.dot"), "w") as f:
                 f.write(graphviz_str)
-            print(f"Generated tree visualization for {seq_record.id}")
+            
+            # Generate nesting graph visualization
+            graph_visual_dir_path = os.path.join(self.output_dir_path, VISUAL_DIR_NAME)
+            os.makedirs(graph_visual_dir_path, exist_ok=True)
+            nesting_graphviz_str = seq_tree.nesting_graph.to_graphviz_dot(prefix=seq_record.id)
+            with open(os.path.join(graph_visual_dir_path, f"{seq_record.id}_graph_visual.dot"), "w") as f:
+                f.write(nesting_graphviz_str)
+            
+            print(f"Generated tree and graph visualizations for {seq_record.id}")
 
         return new_seq_record, all_used_donors, all_reconstructed_donors
 
