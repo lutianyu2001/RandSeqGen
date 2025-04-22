@@ -342,9 +342,11 @@ class SequenceTree:
         """Release an UID back to the UID management system"""
         if uid in self.node_dict:
             del self.node_dict[uid]
+
+        if uid not in self.available_uids:
             self.available_uids.append(uid)
 
-    def _create_node(self, data: str, is_donor: bool = False, donor_id: str = None) -> SequenceNode:
+    def _create_node(self, data: str, is_donor: bool = False, donor_id: str = None, uid: int = None) -> SequenceNode:
         """
         Create a new SequenceNode with a unique UID.
 
@@ -352,11 +354,12 @@ class SequenceTree:
             data (str): Sequence data
             is_donor (bool): Whether this node contains a donor sequence
             donor_id (str): Donor ID for tracking and visualization
+            preset_uid (int): 预设的UID，如果提供则使用此UID
 
         Returns:
             SequenceNode: The newly created node
         """
-        uid = self._get_next_uid()
+        uid = uid or self._get_next_uid()
         node = SequenceNode(data, is_donor, donor_id, uid)
         self.node_dict[uid] = node
         return node
@@ -403,8 +406,9 @@ class SequenceTree:
         if not donor_seq:
             return node
 
-        # 创建donor节点并添加到嵌套关系图
-        donor_node_uid = self._get_next_uid()  # 提前创建UID以在关系图中使用
+        # 创建donor节点UID
+        donor_node_uid = self._get_next_uid()
+        # 添加到嵌套关系图
         self.nesting_graph.add_node(donor_node_uid, donor_seq, donor_id, abs_position)
 
         # Calculate positions in tree
@@ -416,11 +420,8 @@ class SequenceTree:
             if node.left:
                 node.left = self._insert_recursive(node.left, abs_position, donor_seq, donor_id, tsd_length)
             else:
-                # Insert as left child
-                new_donor = self._create_node(donor_seq, True, donor_id)
-                new_donor.uid = donor_node_uid  # 使用预先创建的UID
-                self.node_dict[donor_node_uid] = new_donor
-                node.left = new_donor
+                # Insert as left child - 使用预先创建的UID
+                node.left = self._create_node(donor_seq, True, donor_id, donor_node_uid)
 
                 # 如果当前节点是donor，记录嵌套关系
                 if node.is_donor:
@@ -453,11 +454,12 @@ class SequenceTree:
                 left_data = left_data + tsd_5
                 right_data = tsd_3 + right_data
 
-            # 确定当前节点是否是donor
+            # 保存当前节点的信息
+            old_node_uid = node.uid
             is_current_donor = node.is_donor
             current_donor_id = node.donor_id
 
-            # 创建左、右片段节点
+            # 创建左、右片段节点的UID
             left_node_uid = self._get_next_uid()
             right_node_uid = self._get_next_uid()
 
@@ -465,22 +467,16 @@ class SequenceTree:
             self.nesting_graph.add_node(left_node_uid, left_data, current_donor_id, node_start)
             self.nesting_graph.add_node(right_node_uid, right_data, current_donor_id, abs_position + len(donor_seq))
 
-            # Create new left child with left data
-            new_left = self._create_node(left_data, is_current_donor, current_donor_id)
-            new_left.uid = left_node_uid
-            self.node_dict[left_node_uid] = new_left
-
+            # 使用预设的UID创建新节点
+            new_left = self._create_node(left_data, is_current_donor, current_donor_id, left_node_uid)
             if node.left:
                 new_left.left = node.left
                 new_left.update()
                 # Balance left subtree
                 new_left = new_left.balance()
 
-            # Create new right child with right data and original right child
-            new_right = self._create_node(right_data, is_current_donor, current_donor_id)
-            new_right.uid = right_node_uid
-            self.node_dict[right_node_uid] = new_right
-
+            # 使用预设的UID创建右节点
+            new_right = self._create_node(right_data, is_current_donor, current_donor_id, right_node_uid)
             if node.right:
                 new_right.right = node.right
                 new_right.update()
@@ -492,19 +488,28 @@ class SequenceTree:
                 # 添加切割关系到嵌套关系图
                 self.nesting_graph.add_cut_relation(
                     donor_node_uid,  # 切割者donor的UID
-                    node.uid,        # 被切割donor的UID
+                    old_node_uid,    # 被切割donor的UID
                     left_node_uid,   # 切割后左片段的UID
                     right_node_uid   # 切割后右片段的UID
                 )
 
                 # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
-                containers = self.nesting_graph.get_containers(node.uid)
+                containers = self.nesting_graph.get_containers(old_node_uid)
                 for container_uid in containers:
                     # 将嵌套关系从父节点转移到两个片段
                     self.nesting_graph.add_nesting_relation(container_uid, left_node_uid)
                     self.nesting_graph.add_nesting_relation(container_uid, right_node_uid)
-
-            # Replace current node's data with the donor sequence
+            
+            # # 更新当前节点 - 使用预创建的donor_node_uid
+            # # 移除旧的UID映射
+            # if old_node_uid in self.node_dict:
+            #     del self.node_dict[old_node_uid]
+                
+            # # 释放旧UID
+            # self.available_uids.append(old_node_uid)
+            self._release_uid(old_node_uid)
+            
+            # 更新节点信息
             node.data = donor_seq
             node.length = len(donor_seq)
             node.is_donor = True
@@ -524,11 +529,8 @@ class SequenceTree:
             if node.right:
                 node.right = self._insert_recursive(node.right, abs_position - node_end, donor_seq, donor_id, tsd_length)
             else:
-                # Insert as right child
-                new_donor = self._create_node(donor_seq, True, donor_id)
-                new_donor.uid = donor_node_uid  # 使用预先创建的UID
-                self.node_dict[donor_node_uid] = new_donor
-                node.right = new_donor
+                # Insert as right child - 使用预先创建的UID
+                node.right = self._create_node(donor_seq, True, donor_id, donor_node_uid)
 
                 # 如果当前节点是donor，记录嵌套关系
                 if node.is_donor:
@@ -562,8 +564,9 @@ class SequenceTree:
         parent_stack = []
         path_directions = []  # Record the path direction from root to current node ('left' or 'right')
 
-        # 创建donor节点并添加到嵌套关系图
-        donor_node_uid = self._get_next_uid()  # 提前创建UID以在关系图中使用
+        # 创建donor节点UID
+        donor_node_uid = self._get_next_uid()
+        # 添加到嵌套关系图
         self.nesting_graph.add_node(donor_node_uid, donor_seq, donor_id, abs_position)
 
         # Iteratively find insertion position
@@ -579,11 +582,8 @@ class SequenceTree:
                     path_directions.append('left')
                     current = current.left
                 else:
-                    # Create new left child node
-                    new_donor = self._create_node(donor_seq, True, donor_id)
-                    new_donor.uid = donor_node_uid  # 使用预先创建的UID
-                    self.node_dict[donor_node_uid] = new_donor
-                    current.left = new_donor
+                    # Create new left child node - 使用预先创建的UID
+                    current.left = self._create_node(donor_seq, True, donor_id, donor_node_uid)
 
                     # 如果当前节点是donor，记录嵌套关系
                     if current.is_donor:
@@ -616,11 +616,12 @@ class SequenceTree:
                     left_data = left_data + tsd_5
                     right_data = tsd_3 + right_data
 
-                # 确定当前节点是否是donor
+                # 保存当前节点信息
+                old_node_uid = current.uid
                 is_current_donor = current.is_donor
                 current_donor_id = current.donor_id
 
-                # 创建左、右片段节点
+                # 创建左、右片段节点UID
                 left_node_uid = self._get_next_uid()
                 right_node_uid = self._get_next_uid()
 
@@ -628,20 +629,14 @@ class SequenceTree:
                 self.nesting_graph.add_node(left_node_uid, left_data, current_donor_id, node_start)
                 self.nesting_graph.add_node(right_node_uid, right_data, current_donor_id, abs_position + len(donor_seq))
 
-                # Create new left child with left data
-                new_left = self._create_node(left_data, is_current_donor, current_donor_id)
-                new_left.uid = left_node_uid
-                self.node_dict[left_node_uid] = new_left
-
+                # 使用预设的UID创建左节点
+                new_left = self._create_node(left_data, is_current_donor, current_donor_id, left_node_uid)
                 if current.left:
                     new_left.left = current.left
                     new_left.update()
 
-                # Create new right child with right data and original right child
-                new_right = self._create_node(right_data, is_current_donor, current_donor_id)
-                new_right.uid = right_node_uid
-                self.node_dict[right_node_uid] = new_right
-
+                # 使用预设的UID创建右节点
+                new_right = self._create_node(right_data, is_current_donor, current_donor_id, right_node_uid)
                 if current.right:
                     new_right.right = current.right
                     new_right.update()
@@ -651,23 +646,28 @@ class SequenceTree:
                     # 添加切割关系到嵌套关系图
                     self.nesting_graph.add_cut_relation(
                         donor_node_uid,  # 切割者donor的UID
-                        current.uid,     # 被切割donor的UID
+                        old_node_uid,    # 被切割donor的UID
                         left_node_uid,   # 切割后左片段的UID
                         right_node_uid   # 切割后右片段的UID
                     )
 
                     # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
-                    containers = self.nesting_graph.get_containers(current.uid)
+                    containers = self.nesting_graph.get_containers(old_node_uid)
                     for container_uid in containers:
                         # 将嵌套关系从父节点转移到两个片段
                         self.nesting_graph.add_nesting_relation(container_uid, left_node_uid)
                         self.nesting_graph.add_nesting_relation(container_uid, right_node_uid)
-                elif not is_current_donor:
-                    # 如果不是donor，仍然要添加节点到图中，但不记录嵌套和切割关系
-                    # 因为我们需要在图中保持完整的树结构，目前只有添加节点相关代码
-                    pass
-
-                # Replace current node's data with the donor sequence
+                
+                # # 更新当前节点 - 使用预创建的donor_node_uid
+                # # 移除旧的UID映射
+                # if old_node_uid in self.node_dict:
+                #     del self.node_dict[old_node_uid]
+                    
+                # # 释放旧UID
+                # self.available_uids.append(old_node_uid)
+                self._release_uid(old_node_uid)
+                
+                # 更新节点信息
                 current.data = donor_seq
                 current.length = len(donor_seq)
                 current.is_donor = True
@@ -691,11 +691,8 @@ class SequenceTree:
                     abs_position -= node_end
                     current = current.right
                 else:
-                    # Create new right child node
-                    new_donor = self._create_node(donor_seq, True, donor_id)
-                    new_donor.uid = donor_node_uid  # 使用预先创建的UID
-                    self.node_dict[donor_node_uid] = new_donor
-                    current.right = new_donor
+                    # Create new right child node - 使用预先创建的UID
+                    current.right = self._create_node(donor_seq, True, donor_id, donor_node_uid)
 
                     # 如果当前节点是donor，记录嵌套关系
                     if current.is_donor:
