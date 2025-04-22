@@ -494,7 +494,7 @@ class SequenceTree:
                 )
 
                 # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
-                containers = self.nesting_graph.get_containers(old_node_uid)
+                containers = self.nesting_graph.get_nested_in(old_node_uid)
                 for container_uid in containers:
                     # 将嵌套关系从父节点转移到两个片段
                     self.nesting_graph.add_nesting_relation(container_uid, left_node_uid)
@@ -652,7 +652,7 @@ class SequenceTree:
                     )
 
                     # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
-                    containers = self.nesting_graph.get_containers(old_node_uid)
+                    containers = self.nesting_graph.get_nested_in(old_node_uid)
                     for container_uid in containers:
                         # 将嵌套关系从父节点转移到两个片段
                         self.nesting_graph.add_nesting_relation(container_uid, left_node_uid)
@@ -907,7 +907,7 @@ class SequenceTree:
                 fill_color = "lightpink"  # Cut fragments shown in pink
 
         # Check for nesting relationships
-        containers = self.nesting_graph.get_containers(node.uid)
+        containers = self.nesting_graph.get_nested_in(node.uid)
         if containers:
             nested_in = "Nest: " + ','.join(map(str, containers)) + "\\n"
             if cut_half:  # 如果既是切割片段又有嵌套关系
@@ -1161,11 +1161,11 @@ class DonorNestingGraph:
         """获取原始donor的所有片段"""
         return [uid for uid, (orig, _, _) in self.fragments.items() if orig == original_uid]
 
-    def get_nested_donors(self, container_uid: int) -> list:
+    def get_nesting(self, container_uid: int) -> list:
         """获取嵌套在指定donor中的所有donor"""
         return self.nestings.get(container_uid, [])
 
-    def get_containers(self, nested_uid: int) -> list:
+    def get_nested_in(self, nested_uid: int) -> list:
         """获取包含指定donor的所有donor"""
         return self.nested_in.get(nested_uid, [])
 
