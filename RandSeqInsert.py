@@ -364,7 +364,7 @@ class SequenceTree:
         self.node_dict[uid] = node
         return node
 
-    def insert(self, abs_position: int, donor_seq: str, donor_id: str = None, tsd_length: int = 0, recursive: bool = False) -> None:
+    def insert(self, abs_position: int, donor_seq: str, donor_id: str = None, tsd_length: int = 0, recursive: bool = False, debug: bool = False) -> None:
         """
         Insert a donor sequence at the specified position.
 
@@ -383,12 +383,12 @@ class SequenceTree:
         zero_based_position = abs_position - 1
 
         if not recursive:
-            self.root = self._insert_iterative(self.root, zero_based_position, donor_seq, donor_id, tsd_length)
+            self.root = self._insert_iterative(self.root, zero_based_position, donor_seq, donor_id, tsd_length, debug)
         else:
-            self.root = self._insert_recursive(self.root, zero_based_position, donor_seq, donor_id, tsd_length)
+            self.root = self._insert_recursive(self.root, zero_based_position, donor_seq, donor_id, tsd_length, debug)
 
     def _insert_recursive(self, node: SequenceNode, abs_position: int, donor_seq: str, 
-                      donor_id: str = None, tsd_length: int = 0) -> SequenceNode:
+                      donor_id: str = None, tsd_length: int = 0, debug: bool = False) -> SequenceNode:
         """
         Recursively insert a donor sequence at the absolute position in the tree.
 
@@ -542,7 +542,7 @@ class SequenceTree:
         raise RuntimeError("[ERROR] Should not reach here")
 
     def _insert_iterative(self, node: SequenceNode, abs_position: int, donor_seq: str, 
-                          donor_id: str = None, tsd_length: int = 0) -> SequenceNode:
+                          donor_id: str = None, tsd_length: int = 0, debug: bool = False) -> SequenceNode:
         """
         Iteratively insert a donor sequence at the absolute position in the tree.
 
@@ -1082,16 +1082,23 @@ class DonorNestingGraph:
 
         return self
 
-    def add_nesting_relation(self, container_uid: int, nested_uid: int):
+    def add_nesting_relation(self, container_uid: int, nested_uid: int, debug: bool = False):
         """
         添加嵌套关系
 
         Args:
             container_uid: 容器donor的UID
             nested_uid: 嵌套在其中的donor的UID
+            debug: TODO
         """
         # 确保节点存在
-        if container_uid not in self.nodes or nested_uid not in self.nodes:
+        if container_uid not in self.nodes:
+            if debug:
+                print(f"Warning: Container node with UID {container_uid} not found in nesting graph!")
+            return self
+        if nested_uid not in self.nodes:
+            if debug:
+                print(f"Warning: Nested node with UID {nested_uid} not found in nesting graph!")
             return self
 
         # 添加正向和反向映射
@@ -1767,7 +1774,7 @@ class SeqGenerator:
 
             # Insert donors into the tree
             for pos, donor_seq in zip(insert_positions, selected_donors):
-                seq_tree.insert(pos, donor_seq, None, self.tsd_length, self.flag_recursive)
+                seq_tree.insert(pos, donor_seq, None, self.tsd_length, self.flag_recursive, self.flag_debug)
 
         # Collect donor sequences once after all iterations if tracking is enabled
         if self.flag_track:
