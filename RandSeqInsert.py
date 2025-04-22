@@ -996,6 +996,74 @@ class DonorNestingGraph:
         # 返回父片段映射：left_uid/right_uid -> original_uid
         # 记录左/右片段对应的原始donor
         self.fragment_to_original = {}
+        
+    def __str__(self) -> str:
+        """
+        打印图的所有属性信息，用于调试
+        
+        Returns:
+            str: 格式化的图信息字符串
+        """
+        lines = []
+        
+        # 标题
+        lines.append("=" * 32)
+        lines.append("DonorNestingGraph 信息")
+        lines.append("=" * 32)
+        
+        # 节点信息
+        lines.append(f"\n节点数量: {len(self.nodes)}")
+        for uid, info in self.nodes.items():
+            seq = info.get('sequence', '')
+            seq_display = seq if len(seq) <= 20 else f"{seq[:10]}...{seq[-10:]}"
+            lines.append(f"  UID {uid}: 长度={info.get('length', 0)}, "
+                         f"donor_id={info.get('donor_id', 'None')}, "
+                         f"位置={info.get('position', 'None')}, "
+                         f"序列={seq_display}")
+        
+        # 嵌套关系
+        lines.append(f"\n嵌套关系数量: {sum(len(nested) for nested in self.nestings.values())}")
+        for container, nested_list in self.nestings.items():
+            if nested_list:
+                lines.append(f"  容器 {container} 包含: {nested_list}")
+        
+        # 反向嵌套关系
+        lines.append(f"\n反向嵌套关系数量: {sum(len(containers) for containers in self.nested_in.values())}")
+        for nested, containers in self.nested_in.items():
+            if containers:
+                lines.append(f"  节点 {nested} 被包含于: {containers}")
+        
+        # 切割关系
+        cut_count = sum(len(cuts) for cuts in self.cuts.values())
+        lines.append(f"\n切割关系数量: {cut_count}")
+        for cutter, cut_list in self.cuts.items():
+            if cut_list:
+                for cut_info in cut_list:
+                    cut_uid, left_uid, right_uid = cut_info
+                    lines.append(f"  切割者 {cutter} 切割了 {cut_uid} 产生片段: 左={left_uid}, 右={right_uid}")
+        
+        # 反向切割关系
+        cut_by_count = sum(len(cuts) for cuts in self.cut_by.values())
+        lines.append(f"\n反向切割关系数量: {cut_by_count}")
+        for cut, cutter_list in self.cut_by.items():
+            if cutter_list:
+                for cut_info in cutter_list:
+                    cutter_uid, left_uid, right_uid = cut_info
+                    lines.append(f"  被切割者 {cut} 被 {cutter_uid} 切割产生片段: 左={left_uid}, 右={right_uid}")
+        
+        # 片段关系
+        lines.append(f"\n片段关系数量: {len(self.fragments)}")
+        for frag_uid, frag_info in self.fragments.items():
+            orig_uid, pos, is_left = frag_info
+            side = "左" if is_left else "右"
+            lines.append(f"  片段 {frag_uid} 来自 {orig_uid} 的{side}侧, 位置={pos}")
+        
+        # 片段-原始映射
+        lines.append(f"\n片段-原始映射数量: {len(self.fragment_to_original)}")
+        for frag_uid, orig_uid in self.fragment_to_original.items():
+            lines.append(f"  片段 {frag_uid} -> 原始 {orig_uid}")
+        
+        return "\n".join(lines)
 
     def add_node(self, uid: int, sequence: str, donor_id: str = None, position: int = None):
         """
@@ -1528,7 +1596,7 @@ class SeqGenerator:
                  donor_lib: Optional[List[str]] = None, donor_lib_weight: Optional[List[float]] = None,
                  donor_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
                  tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False, 
-                 iteration: int = 1):
+                 iteration: int = 1, flag_debug: bool = False):
         """
         Initialize the sequence generator.
 
@@ -1545,7 +1613,9 @@ class SeqGenerator:
             flag_track: Whether to track donor sequences used
             tsd_length: Length of Target Site Duplication (TSD) to generate
             flag_visual: Whether to generate graphviz visualization of the sequence tree
+            flag_recursive: Whether to use recursive insertion method
             iteration: Number of insertion iterations to perform on each sequence
+            flag_debug: Whether to enable debug mode
         """
         self.input_file: str = input_file
         self.insertion: int = convert_humanized_int(insertion)
@@ -1559,6 +1629,7 @@ class SeqGenerator:
         self.flag_visual: bool = flag_visual
         self.flag_recursive: bool = flag_recursive
         self.iteration: int = iteration
+        self.flag_debug: bool = flag_debug
 
         # Load input sequence
         try:
@@ -1604,6 +1675,8 @@ class SeqGenerator:
             print(f"Using recursive insertion method")
         if self.flag_visual:
             print(f"Tree and Graph visualization enabled")
+        if self.flag_debug:
+            print(f"Debug mode enabled: detailed nesting graph information will be printed")
 
     def __pre_check(self):
         """
@@ -1735,6 +1808,12 @@ class SeqGenerator:
                 f.write(nesting_graphviz_str)
 
             print(f"Generated tree and graph visualizations for {seq_record.id}")
+
+        # 如果启用debug模式，打印嵌套关系图的详细信息
+        if self.flag_debug:
+            print(f"\n[DEBUG] 嵌套关系图信息 for {seq_record.id}:")
+            print(str(seq_tree.nesting_graph))
+            print("[DEBUG] 嵌套关系图信息结束\n")
 
         return new_seq_record, all_used_donors, all_reconstructed_donors
 
@@ -1891,6 +1970,8 @@ def main():
                        help="Generate Graphviz DOT files visualizing the tree structure of each sequence. Files will be named {seqid}_tree_visual.dot and saved in the output directory.")
     flag_group.add_argument("--recursive", action="store_true",
                        help="Use recursive insertion method instead of iterative one.")
+    flag_group.add_argument("--debug", action="store_true",
+                       help="Enable debug mode to print detailed information about the nesting graph.")
 
     parsed_args = parser.parse_args()
 
@@ -1908,7 +1989,8 @@ def main():
         tsd_length=parsed_args.tsd,
         flag_visual=parsed_args.visual,
         flag_recursive=parsed_args.recursive,
-        iteration=parsed_args.iteration
+        iteration=parsed_args.iteration,
+        flag_debug=parsed_args.debug
     )
     generator.execute()
 
