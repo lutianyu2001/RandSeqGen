@@ -15,7 +15,7 @@ import os
 import argparse
 import random
 import re
-from typing import Tuple, List, Dict, Iterable, Sequence, Union, Optional, Callable, Set
+from typing import Tuple, List, Dict, Iterable, Sequence, Union, Optional, Callable
 import multiprocessing as mp
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -200,7 +200,7 @@ class SequenceNode:
         self.update_height()
         self.update_total_length()
 
-    def _get_balance_factor(self):
+    def get_balance_factor(self):
         """
         Calculate the balance factor of this node.
 
@@ -259,7 +259,7 @@ class SequenceNode:
             SequenceNode: The new root after balancing
         """
         self.update_height()
-        balance = self._get_balance_factor()
+        balance = self.get_balance_factor()
 
         # Left-Left case
         if balance > 1 and (self.left and self.__get_left_balance() >= 0):
@@ -283,11 +283,11 @@ class SequenceNode:
 
     def __get_left_balance(self):
         """Get balance factor of left child"""
-        return self.left._get_balance_factor() if self.left else 0
+        return self.left.get_balance_factor() if self.left else 0
 
     def __get_right_balance(self):
         """Get balance factor of right child"""
-        return self.right._get_balance_factor() if self.right else 0
+        return self.right.get_balance_factor() if self.right else 0
 
 
 class SequenceTree:
@@ -354,7 +354,7 @@ class SequenceTree:
             data (str): Sequence data
             is_donor (bool): Whether this node contains a donor sequence
             donor_id (str): Donor ID for tracking and visualization
-            preset_uid (int): 预设的UID，如果提供则使用此UID
+            uid (int): 预设的UID，如果提供则使用此UID
 
         Returns:
             SequenceNode: The newly created node
@@ -839,7 +839,7 @@ class SequenceTree:
                    "  edge [fontcolor=\"#000\"];"]
 
         # Generate nodes and edges through recursive traversal
-        nodes, edges = self._build_graphviz_dot_nodes_edges(self.root, node_id_prefix)
+        nodes, edges = self.__build_graphviz_dot_nodes_edges(self.root, node_id_prefix)
 
         # Add all nodes and edges to the DOT string
         for node in nodes:
@@ -850,7 +850,7 @@ class SequenceTree:
         dot_str.append('}')
         return '\n'.join(dot_str)
 
-    def _build_graphviz_dot_nodes_edges(self, node: SequenceNode, node_id_prefix: str, abs_pos: int = 0) -> tuple:
+    def __build_graphviz_dot_nodes_edges(self, node: SequenceNode, node_id_prefix: str, abs_pos: int = 0) -> tuple:
         """
         Recursively build nodes and edges for Graphviz visualization.
 
@@ -938,7 +938,7 @@ class SequenceTree:
         if node.left:
             # Left child should start at the same absolute position as its parent
             left_abs_pos = abs_pos
-            left_nodes, left_edges = self._build_graphviz_dot_nodes_edges(
+            left_nodes, left_edges = self.__build_graphviz_dot_nodes_edges(
                 node.left, f"{node_id_prefix}_L", left_abs_pos
             )
             nodes.extend(left_nodes)
@@ -952,7 +952,7 @@ class SequenceTree:
         if node.right:
             # Right child starts at the end position of the current node
             right_abs_pos = abs_pos + left_length + node.length
-            right_nodes, right_edges = self._build_graphviz_dot_nodes_edges(
+            right_nodes, right_edges = self.__build_graphviz_dot_nodes_edges(
                 node.right, f"{node_id_prefix}_R", right_abs_pos
             )
             nodes.extend(right_nodes)
@@ -1197,12 +1197,9 @@ class DonorNestingGraph:
 
         return reconstructed, excluded
 
-    def to_graphviz_dot(self, prefix: str = "donor_graph") -> str:
+    def to_graphviz_dot(self) -> str:
         """
         生成Graphviz DOT格式可视化
-
-        Args:
-            prefix: 图形文件名前缀
 
         Returns:
             str: Graphviz DOT格式字符串
@@ -1733,7 +1730,7 @@ class SeqGenerator:
             # Generate nesting graph visualization
             graph_visual_dir_path = os.path.join(self.output_dir_path, VISUAL_DIR_NAME)
             os.makedirs(graph_visual_dir_path, exist_ok=True)
-            nesting_graphviz_str = seq_tree.nesting_graph.to_graphviz_dot(prefix=seq_record.id)
+            nesting_graphviz_str = seq_tree.nesting_graph.to_graphviz_dot()
             with open(os.path.join(graph_visual_dir_path, f"{seq_record.id}_graph_visual.dot"), "w") as f:
                 f.write(nesting_graphviz_str)
 
