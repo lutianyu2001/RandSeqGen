@@ -923,14 +923,6 @@ class SequenceTree:
                         nested_in,
                         cut_half])
 
-        # 显示短序列（如果太长则截断）
-        if node.length <= 10:
-            seq_display = node.data
-        else:
-            seq_display = node.data[:5] + "..." + node.data[-5:]
-            
-        label += f"Seq: {seq_display}\\n"
-
         # Add the node to the nodes list
         nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
 
