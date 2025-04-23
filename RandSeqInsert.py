@@ -102,8 +102,12 @@ def generate_TSD(seq_slice_right: str,
     Returns:
         Tuple[str, str]: (5' TSD sequence, 3' TSD sequence)
     """
-    # Initialize both ends of TSD
     tsd_length = min(len(seq_slice_right), length or len(seq_slice_right))
+    # if tsd_length < length:
+    #     print(f"[Warning] Requested TSD length {length} exceeds available sequence length {len(seq_slice_right)}. "
+    #           f"Using {tsd_length} instead.")
+    
+    # Initialize both ends of TSD
     tsd_5 = tsd_3 = seq_slice_right[:tsd_length]
 
     # Apply SNP mutation
@@ -1056,12 +1060,13 @@ class DonorNestingGraph:
 
     def reconstruct_donors(self, seq_id: str) -> tuple:
         """
-        重新设计的donor重建算法，仅基于切割关系重建donor序列
-
+        改进的donor重建算法，处理多重切割情况
+        
         该算法通过以下步骤重建donor序列：
         1. 构建donor切割图，将每个donor视为节点，切割关系作为边
-        2. 对每个被切割的donor，递归搜索所有切割它的donor及其片段
+        2. 对每个被切割的donor，处理所有切割它的donor及其片段
         3. 重建完整和清洁版本的donor序列
+        4. 正确处理多重切割情况，确保所有切割关系都被考虑
 
         Args:
             seq_id: 序列标识符，用于构建输出记录ID
@@ -1071,43 +1076,75 @@ class DonorNestingGraph:
         """
         reconstructed = []
         excluded = set()
-
+        
         # 找出所有被切割的donor节点
         cut_donors = list(self.cut_by.keys())
-
-        # 针对每个被切割的donor，构建重建信息
+        
+        # 阶段1: 收集所有重建信息，但不立即排除UID
+        reconstruction_plans = []
+        
+        # 针对每个被切割的donor，构建所有可能的重建方案
         for donor_uid in cut_donors:
-            # 已处理过的跳过
-            if donor_uid in excluded:
-                continue
-
             # 收集所有切割信息
             cut_info_list = self.cut_by.get(donor_uid, [])
             if not cut_info_list:
                 continue
-
+                
+            # 为此donor收集所有重建方案
+            donor_plans = []
+            
             # 遍历所有切割记录
             for cut_info in cut_info_list:
                 cutter_uid, left_uid, right_uid = cut_info
-
-                # 如果已经处理过相关UID则跳过
-                if any(uid in excluded for uid in [donor_uid, cutter_uid, left_uid, right_uid]):
-                    continue
-
-                # 获取相关序列数据
+                
+                # 验证节点存在
                 if not all(uid in self.nodes for uid in [donor_uid, cutter_uid, left_uid, right_uid]):
                     continue
-
+                    
                 try:
                     left_seq = self.nodes[left_uid]['sequence']
                     right_seq = self.nodes[right_uid]['sequence']
                     cutter_seq = self.nodes[cutter_uid]['sequence']
                 except KeyError:
                     continue
-
-                # 创建两种重建序列：
+                    
+                # 添加重建方案
+                donor_plans.append({
+                    'donor_uid': donor_uid,
+                    'cutter_uid': cutter_uid,
+                    'left_uid': left_uid,
+                    'right_uid': right_uid,
+                    'left_seq': left_seq,
+                    'right_seq': right_seq,
+                    'cutter_seq': cutter_seq
+                })
+                
+            # 如果找到了重建方案，添加到总方案列表
+            if donor_plans:
+                reconstruction_plans.append(donor_plans)
+        
+        # 阶段2: 处理重建方案并生成序列
+        for donor_plans in reconstruction_plans:
+            donor_uid = donor_plans[0]['donor_uid']  # 所有方案都是为同一个donor
+            
+            # 如果这个donor已经被处理过，跳过
+            if donor_uid in excluded:
+                continue
+                
+            # 处理该donor的所有切割方案
+            clean_reconstructions = []  # 存储所有clean重建
+            
+            for plan in donor_plans:
+                cutter_uid = plan['cutter_uid']
+                left_uid = plan['left_uid']
+                right_uid = plan['right_uid']
+                
+                # 如果相关UID中任何一个已经被排除，跳过此方案
+                if any(uid in excluded for uid in [cutter_uid, left_uid, right_uid]):
+                    continue
+                    
                 # 1. 完整重建 - 包含切割donor (left + cutter + right)
-                full_seq = left_seq + cutter_seq + right_seq
+                full_seq = plan['left_seq'] + plan['cutter_seq'] + plan['right_seq']
                 full_id = f"{seq_id}_reconstructed_{donor_uid}_{cutter_uid}"
                 full_rec = create_sequence_record(full_seq, full_id)
                 full_rec.annotations["reconstruction_type"] = "full"
@@ -1116,23 +1153,45 @@ class DonorNestingGraph:
                 full_rec.annotations["left_uid"] = left_uid
                 full_rec.annotations["right_uid"] = right_uid
                 reconstructed.append(full_rec)
-
+                
                 # 2. 清洁重建 - 不包含切割donor (left + right)
-                clean_seq = left_seq + right_seq
+                clean_seq = plan['left_seq'] + plan['right_seq']
+                clean_rec_data = {
+                    'seq': clean_seq,
+                    'left_uid': left_uid,
+                    'right_uid': right_uid,
+                    'cutter_uid': cutter_uid
+                }
+                clean_reconstructions.append(clean_rec_data)
+                
+                # 将cutter UID添加到排除集合（切割者已经被处理）
+                excluded.add(cutter_uid)
+            
+            # 添加清洁重建记录（每个donor只需要一个清洁重建）
+            if clean_reconstructions:
+                # 使用第一个重建方案创建记录
+                first_clean = clean_reconstructions[0]
                 clean_id = f"{seq_id}_clean_reconstructed_{donor_uid}"
-                clean_rec = create_sequence_record(clean_seq, clean_id)
+                clean_rec = create_sequence_record(first_clean['seq'], clean_id)
                 clean_rec.annotations["reconstruction_type"] = "clean"
                 clean_rec.annotations["original_uid"] = donor_uid
-                clean_rec.annotations["left_uid"] = left_uid
-                clean_rec.annotations["right_uid"] = right_uid
+                clean_rec.annotations["left_uid"] = first_clean['left_uid']
+                clean_rec.annotations["right_uid"] = first_clean['right_uid']
+                
+                # 如果有多个切割，添加额外信息
+                if len(clean_reconstructions) > 1:
+                    clean_rec.annotations["multiple_cuts"] = True
+                    clean_rec.annotations["cut_count"] = len(clean_reconstructions)
+                    # 记录所有切割者
+                    clean_rec.annotations["all_cutters"] = [rec['cutter_uid'] for rec in clean_reconstructions]
+                    
                 reconstructed.append(clean_rec)
-
-                # 将相关UID添加到排除集合
-                excluded.update([donor_uid, cutter_uid, left_uid, right_uid])
-
-                # 处理完一个切割关系后转到下一个donor
-                break
-
+                
+            # 将所有相关的片段UID和donor UID添加到排除集合
+            for plan in donor_plans:
+                excluded.update([plan['left_uid'], plan['right_uid']])
+            excluded.add(donor_uid)  # 被切割的donor本身
+                
         return reconstructed, excluded
 
     def to_graphviz_dot(self) -> str:
@@ -1186,6 +1245,82 @@ class DonorNestingGraph:
 
         lines.append("}")
         return '\n'.join(lines)
+
+    def test_multiple_cuts(self):
+        """
+        测试多重切割情况下的重建算法
+        
+        创建一个被多个供体切割的情景，然后执行重建，验证所有切割关系是否都被正确处理。
+        
+        Returns:
+            tuple: (重建的donor记录列表, 是否成功)
+        """
+        # 重置图数据结构
+        self.__init__()
+        
+        # 创建一个被多次切割的简单情景
+        # 原始donor (UID 1) 被三个不同的donor切割：
+        # - donor 2 切割在位置10，生成片段3和4
+        # - donor 5 切割在位置20，生成片段6和7
+        # - donor 8 切割在位置30，生成片段9和10
+        
+        # 创建所有节点
+        self.add_node(1, "ORIGINAL_DONOR_SEQUENCE", "orig", 0)
+        
+        # 切割者1
+        self.add_node(2, "FIRST_CUTTER", "c1", 10)
+        self.add_node(3, "LEFT_FRAGMENT_1", None, 0)  # 左片段1
+        self.add_node(4, "RIGHT_FRAGMENT_1", None, 20)  # 右片段1
+        
+        # 切割者2
+        self.add_node(5, "SECOND_CUTTER", "c2", 20)
+        self.add_node(6, "LEFT_FRAGMENT_2", None, 0)  # 左片段2
+        self.add_node(7, "RIGHT_FRAGMENT_2", None, 30)  # 右片段2
+        
+        # 切割者3
+        self.add_node(8, "THIRD_CUTTER", "c3", 30)
+        self.add_node(9, "LEFT_FRAGMENT_3", None, 0)  # 左片段3
+        self.add_node(10, "RIGHT_FRAGMENT_3", None, 40)  # 右片段3
+        
+        # 添加切割关系
+        self.add_cut_relation(2, 1, 3, 4)  # 切割者1切割原始donor
+        self.add_cut_relation(5, 1, 6, 7)  # 切割者2切割原始donor
+        self.add_cut_relation(8, 1, 9, 10)  # 切割者3切割原始donor
+        
+        # 重建供体
+        reconstructed, excluded = self.reconstruct_donors("test")
+        
+        # 验证正确性
+        success = True
+        
+        # 检查是否所有切割者都被处理
+        full_recon_count = sum(1 for rec in reconstructed if rec.annotations.get("reconstruction_type") == "full")
+        if full_recon_count != 3:
+            print(f"错误: 应该有3个完整重建，但实际有{full_recon_count}个")
+            success = False
+            
+        # 检查清洁重建数量
+        clean_recon_count = sum(1 for rec in reconstructed if rec.annotations.get("reconstruction_type") == "clean")
+        if clean_recon_count != 1:
+            print(f"错误: 应该有1个清洁重建，但实际有{clean_recon_count}个")
+            success = False
+            
+        # 检查清洁重建的多重切割标记
+        for rec in reconstructed:
+            if rec.annotations.get("reconstruction_type") == "clean":
+                if not rec.annotations.get("multiple_cuts"):
+                    print("错误: 清洁重建应该标记为多重切割")
+                    success = False
+                if rec.annotations.get("cut_count") != 3:
+                    print(f"错误: 切割次数应该是3，但实际是{rec.annotations.get('cut_count')}")
+                    success = False
+        
+        if success:
+            print("多重切割测试成功！所有切割关系都被正确处理。")
+        else:
+            print("多重切割测试失败！请检查重建算法。")
+            
+        return reconstructed, success
 
 # ======================================================================================================================
 # Utility Functions
@@ -1827,9 +1962,21 @@ def main():
                        help="Use recursive insertion method instead of iterative one.")
     flag_group.add_argument("--debug", action="store_true",
                        help="Enable debug mode to print detailed information about the nesting graph.")
+    
+    # 添加测试标志
+    test_group = parser.add_argument_group("Testing Options")
+    test_group.add_argument("--test-multiple-cuts", action="store_true",
+                       help="运行多重切割测试，验证重建算法在处理多个切割关系时的表现。")
 
     parsed_args = parser.parse_args()
-
+    
+    # 如果启用了测试功能，执行测试
+    if parsed_args.test_multiple_cuts:
+        print("\n=== 运行多重切割测试 ===")
+        test_graph = DonorNestingGraph()
+        test_graph.test_multiple_cuts()
+        return
+    
     generator = SeqGenerator(
         input_file=parsed_args.input,
         insertion=parsed_args.insert,
