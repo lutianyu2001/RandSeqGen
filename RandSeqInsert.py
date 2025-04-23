@@ -289,7 +289,6 @@ class SequenceNode:
         """Get balance factor of right child"""
         return self.right.get_balance_factor() if self.right else 0
 
-
 class SequenceTree:
     """
     Manages a tree of SequenceNode objects, with its own UID management system.
@@ -423,10 +422,6 @@ class SequenceTree:
                 # Insert as left child - 使用预先创建的UID
                 node.left = self._create_node(donor_seq, True, donor_id, donor_node_uid)
 
-                # 如果当前节点是donor，记录嵌套关系
-                if node.is_donor:
-                    self.nesting_graph.add_nesting_relation(node.uid, donor_node_uid)
-
             node.update()
             return node.balance()
 
@@ -493,22 +488,8 @@ class SequenceTree:
                     right_node_uid   # 切割后右片段的UID
                 )
 
-                # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
-                containers = self.nesting_graph.get_nested_in(old_node_uid)
-                for container_uid in containers:
-                    # 将嵌套关系从父节点转移到两个片段
-                    self.nesting_graph.add_nesting_relation(container_uid, left_node_uid)
-                    self.nesting_graph.add_nesting_relation(container_uid, right_node_uid)
-            
-            # # 更新当前节点 - 使用预创建的donor_node_uid
-            # # 移除旧的UID映射
-            # if old_node_uid in self.node_dict:
-            #     del self.node_dict[old_node_uid]
-                
-            # # 释放旧UID
-            # self.available_uids.append(old_node_uid)
             self._release_uid(old_node_uid)
-            
+
             # 更新节点信息
             node.data = donor_seq
             node.length = len(donor_seq)
@@ -531,10 +512,6 @@ class SequenceTree:
             else:
                 # Insert as right child - 使用预先创建的UID
                 node.right = self._create_node(donor_seq, True, donor_id, donor_node_uid)
-
-                # 如果当前节点是donor，记录嵌套关系
-                if node.is_donor:
-                    self.nesting_graph.add_nesting_relation(node.uid, donor_node_uid)
 
             node.update()
             return node.balance()
@@ -584,10 +561,6 @@ class SequenceTree:
                 else:
                     # Create new left child node - 使用预先创建的UID
                     current.left = self._create_node(donor_seq, True, donor_id, donor_node_uid)
-
-                    # 如果当前节点是donor，记录嵌套关系
-                    if current.is_donor:
-                        self.nesting_graph.add_nesting_relation(current.uid, donor_node_uid)
 
                     current.update()
                     break
@@ -651,22 +624,8 @@ class SequenceTree:
                         right_node_uid   # 切割后右片段的UID
                     )
 
-                    # 如果当前节点已经在嵌套关系中，需要更新嵌套关系
-                    containers = self.nesting_graph.get_nested_in(old_node_uid)
-                    for container_uid in containers:
-                        # 将嵌套关系从父节点转移到两个片段
-                        self.nesting_graph.add_nesting_relation(container_uid, left_node_uid)
-                        self.nesting_graph.add_nesting_relation(container_uid, right_node_uid)
-                
-                # # 更新当前节点 - 使用预创建的donor_node_uid
-                # # 移除旧的UID映射
-                # if old_node_uid in self.node_dict:
-                #     del self.node_dict[old_node_uid]
-                    
-                # # 释放旧UID
-                # self.available_uids.append(old_node_uid)
                 self._release_uid(old_node_uid)
-                
+
                 # 更新节点信息
                 current.data = donor_seq
                 current.length = len(donor_seq)
@@ -693,10 +652,6 @@ class SequenceTree:
                 else:
                     # Create new right child node - 使用预先创建的UID
                     current.right = self._create_node(donor_seq, True, donor_id, donor_node_uid)
-
-                    # 如果当前节点是donor，记录嵌套关系
-                    if current.is_donor:
-                        self.nesting_graph.add_nesting_relation(current.uid, donor_node_uid)
 
                     current.update()
                     break
@@ -887,15 +842,14 @@ class SequenceTree:
         fill_color = "lightblue" if node.is_donor else "lightgreen"
 
         # Process fragment and nesting information
-        nested_in = ""
         cut_half = ""
-        
+
         # 重新设计颜色赋值逻辑，使其更加明确
         # 1. 先设置基础颜色（donor为蓝色，acceptor为绿色）
         # 2. 如果是切割片段，改为粉色
         # 3. 如果有嵌套关系，改为黄色
         # 4. 如果同时满足2和3，则为紫色
-        
+
         # Check if this is a fragment of a cut donor
         if self.nesting_graph.is_fragment(node.uid):
             # Get fragment info (original_uid, position, is_left)
@@ -906,21 +860,11 @@ class SequenceTree:
                 cut_half = f"Cut: {half_type}\\n"
                 fill_color = "lightpink"  # Cut fragments shown in pink
 
-        # Check for nesting relationships
-        containers = self.nesting_graph.get_nested_in(node.uid)
-        if containers:
-            nested_in = "Nest: " + ','.join(map(str, containers)) + "\\n"
-            if cut_half:  # 如果既是切割片段又有嵌套关系
-                fill_color = "plum"
-            else:  # 如果只有嵌套关系
-                fill_color = "yellow"  # Nested nodes shown in yellow
-
         # Create node label with position information
         label = "".join([node_type, " | ", str(node.uid), "\\n",
                         str(start_pos_1based), "\\l",
                         str(end_pos_1based), "\\l",
                         "Length: ", str(node.length), "\\n",
-                        nested_in,
                         cut_half])
 
         # Add the node to the nodes list
@@ -958,20 +902,12 @@ class SequenceTree:
 
 class DonorNestingGraph:
     """
-    表示donor序列嵌套关系的图数据结构。
-    用于高效追踪和重建嵌套的donor序列，替代之前在SequenceNode中的属性方式。
+    表示donor序列和切割关系的图数据结构。
+    用于高效追踪和重建被切割的donor序列。
     """
     def __init__(self):
         # 节点信息：UID -> {sequence, length, donor_id, positions}
         self.nodes = {}
-
-        # 嵌套关系：container_uid -> [nested_uid1, nested_uid2, ...]
-        # 记录哪些donor嵌套在指定donor内
-        self.nestings = {}
-
-        # 反向嵌套关系：nested_uid -> [container_uid1, container_uid2, ...]
-        # 记录指定donor嵌套在哪些donor内
-        self.nested_in = {}
 
         # 切割关系：cutter_uid -> [(cut_uid, left_uid, right_uid), ...]
         # 记录哪个donor切割了哪个donor，产生了哪两个新片段
@@ -988,21 +924,21 @@ class DonorNestingGraph:
         # 返回父片段映射：left_uid/right_uid -> original_uid
         # 记录左/右片段对应的原始donor
         self.fragment_to_original = {}
-        
+
     def __str__(self) -> str:
         """
         打印图的所有属性信息，用于调试
-        
+
         Returns:
             str: 格式化的图信息字符串
         """
         lines = []
-        
+
         # 标题
         lines.append("=" * 32)
         lines.append("DonorNestingGraph 信息")
         lines.append("=" * 32)
-        
+
         # 节点信息
         lines.append(f"\n节点数量: {len(self.nodes)}")
         for uid, info in self.nodes.items():
@@ -1012,19 +948,7 @@ class DonorNestingGraph:
                          f"donor_id={info.get('donor_id', 'None')}, "
                          f"位置={info.get('position', 'None')}, "
                          f"序列={seq_display}")
-        
-        # 嵌套关系
-        lines.append(f"\n嵌套关系数量: {sum(len(nested) for nested in self.nestings.values())}")
-        for container, nested_list in self.nestings.items():
-            if nested_list:
-                lines.append(f"  容器 {container} 包含: {nested_list}")
-        
-        # 反向嵌套关系
-        lines.append(f"\n反向嵌套关系数量: {sum(len(containers) for containers in self.nested_in.values())}")
-        for nested, containers in self.nested_in.items():
-            if containers:
-                lines.append(f"  节点 {nested} 被包含于: {containers}")
-        
+
         # 切割关系
         cut_count = sum(len(cuts) for cuts in self.cuts.values())
         lines.append(f"\n切割关系数量: {cut_count}")
@@ -1033,7 +957,7 @@ class DonorNestingGraph:
                 for cut_info in cut_list:
                     cut_uid, left_uid, right_uid = cut_info
                     lines.append(f"  切割者 {cutter} 切割了 {cut_uid} 产生片段: 左={left_uid}, 右={right_uid}")
-        
+
         # 反向切割关系
         cut_by_count = sum(len(cuts) for cuts in self.cut_by.values())
         lines.append(f"\n反向切割关系数量: {cut_by_count}")
@@ -1042,19 +966,19 @@ class DonorNestingGraph:
                 for cut_info in cutter_list:
                     cutter_uid, left_uid, right_uid = cut_info
                     lines.append(f"  被切割者 {cut} 被 {cutter_uid} 切割产生片段: 左={left_uid}, 右={right_uid}")
-        
+
         # 片段关系
         lines.append(f"\n片段关系数量: {len(self.fragments)}")
         for frag_uid, frag_info in self.fragments.items():
             orig_uid, pos, is_left = frag_info
             side = "左" if is_left else "右"
             lines.append(f"  片段 {frag_uid} 来自 {orig_uid} 的{side}侧, 位置={pos}")
-        
+
         # 片段-原始映射
         lines.append(f"\n片段-原始映射数量: {len(self.fragment_to_original)}")
         for frag_uid, orig_uid in self.fragment_to_original.items():
             lines.append(f"  片段 {frag_uid} -> 原始 {orig_uid}")
-        
+
         return "\n".join(lines)
 
     def add_node(self, uid: int, sequence: str, donor_id: str = None, position: int = None):
@@ -1073,45 +997,6 @@ class DonorNestingGraph:
             'donor_id': donor_id,
             'position': position
         }
-
-        # 初始化关系映射
-        if uid not in self.nestings:
-            self.nestings[uid] = []
-        if uid not in self.nested_in:
-            self.nested_in[uid] = []
-
-        return self
-
-    def add_nesting_relation(self, container_uid: int, nested_uid: int, debug: bool = False):
-        """
-        添加嵌套关系
-
-        Args:
-            container_uid: 容器donor的UID
-            nested_uid: 嵌套在其中的donor的UID
-            debug: TODO
-        """
-        # 确保节点存在
-        if container_uid not in self.nodes:
-            if debug:
-                print(f"Warning: Container node with UID {container_uid} not found in nesting graph!")
-            return self
-        if nested_uid not in self.nodes:
-            if debug:
-                print(f"Warning: Nested node with UID {nested_uid} not found in nesting graph!")
-            return self
-
-        # 添加正向和反向映射
-        if container_uid not in self.nestings:
-            self.nestings[container_uid] = []
-        if nested_uid not in self.nestings[container_uid]:
-            self.nestings[container_uid].append(nested_uid)
-
-        if nested_uid not in self.nested_in:
-            self.nested_in[nested_uid] = []
-        if container_uid not in self.nested_in[nested_uid]:
-            self.nested_in[nested_uid].append(container_uid)
-
         return self
 
     def add_cut_relation(self, cutter_uid: int, cut_uid: int, left_uid: int, right_uid: int):
@@ -1161,14 +1046,6 @@ class DonorNestingGraph:
         """获取原始donor的所有片段"""
         return [uid for uid, (orig, _, _) in self.fragments.items() if orig == original_uid]
 
-    def get_nesting(self, container_uid: int) -> list:
-        """获取嵌套在指定donor中的所有donor"""
-        return self.nestings.get(container_uid, [])
-
-    def get_nested_in(self, nested_uid: int) -> list:
-        """获取包含指定donor的所有donor"""
-        return self.nested_in.get(nested_uid, [])
-
     def get_cut_by(self, cut_uid: int) -> list:
         """获取切割了指定donor的所有donor信息"""
         return self.cut_by.get(cut_uid, [])
@@ -1179,7 +1056,12 @@ class DonorNestingGraph:
 
     def reconstruct_donors(self, seq_id: str) -> tuple:
         """
-        基于嵌套和切割关系重建donor序列
+        重新设计的donor重建算法，仅基于切割关系重建donor序列
+
+        该算法通过以下步骤重建donor序列：
+        1. 构建donor切割图，将每个donor视为节点，切割关系作为边
+        2. 对每个被切割的donor，递归搜索所有切割它的donor及其片段
+        3. 重建完整和清洁版本的donor序列
 
         Args:
             seq_id: 序列标识符，用于构建输出记录ID
@@ -1187,46 +1069,35 @@ class DonorNestingGraph:
         Returns:
             tuple: (重建的donor记录列表, 排除的UID集合)
         """
-        MAX_RECURSION_DEPTH = 50
         reconstructed = []
         excluded = set()
-        processed_fragments = set()
 
-        # 首先查找所有需要递归重建的片段
-        def process_fragment_tree(fragment_uid, depth=0):
-            if fragment_uid in processed_fragments or depth > MAX_RECURSION_DEPTH:
-                return
-            processed_fragments.add(fragment_uid)
+        # 找出所有被切割的donor节点
+        cut_donors = list(self.cut_by.keys())
 
-            # 检查此片段是否被进一步切割
-            for cutter_uid, left_uid, right_uid in self.cut_by.get(fragment_uid, []):
-                # 递归处理子片段
-                process_fragment_tree(left_uid, depth+1)
-                process_fragment_tree(right_uid, depth+1)
-
-        # 处理所有被切割的donor，从底层往上重建
-        for cut_uid in list(self.cut_by.keys()):
-            process_fragment_tree(cut_uid)
-
-        # 按照处理顺序排序，确保先处理深层片段
-        fragments_to_process = sorted(list(processed_fragments), 
-                                key=lambda uid: len(self.cut_by.get(uid, [])), reverse=True)
-
-        # 处理所有片段
-        for fragment_uid in fragments_to_process:
-            if fragment_uid in excluded:
+        # 针对每个被切割的donor，构建重建信息
+        for donor_uid in cut_donors:
+            # 已处理过的跳过
+            if donor_uid in excluded:
                 continue
 
-            for cutter_uid, left_uid, right_uid in self.cut_by.get(fragment_uid, []):
-                # 跳过已处理的
-                if any(uid in excluded for uid in [fragment_uid, cutter_uid, left_uid, right_uid]):
+            # 收集所有切割信息
+            cut_info_list = self.cut_by.get(donor_uid, [])
+            if not cut_info_list:
+                continue
+
+            # 遍历所有切割记录
+            for cut_info in cut_info_list:
+                cutter_uid, left_uid, right_uid = cut_info
+
+                # 如果已经处理过相关UID则跳过
+                if any(uid in excluded for uid in [donor_uid, cutter_uid, left_uid, right_uid]):
                     continue
 
-                # 检查我们是否有所有需要的节点数据
-                if not all(uid in self.nodes for uid in [fragment_uid, cutter_uid, left_uid, right_uid]):
+                # 获取相关序列数据
+                if not all(uid in self.nodes for uid in [donor_uid, cutter_uid, left_uid, right_uid]):
                     continue
 
-                # 获取序列数据
                 try:
                     left_seq = self.nodes[left_uid]['sequence']
                     right_seq = self.nodes[right_uid]['sequence']
@@ -1234,33 +1105,33 @@ class DonorNestingGraph:
                 except KeyError:
                     continue
 
-                # 重建两种形式的donor：带切割donor和不带切割donor
-
-                # 1. 包含切割donor的完整重建
+                # 创建两种重建序列：
+                # 1. 完整重建 - 包含切割donor (left + cutter + right)
                 full_seq = left_seq + cutter_seq + right_seq
-                full_id = f"{seq_id}_reconstructed_{fragment_uid}_{cutter_uid}"
+                full_id = f"{seq_id}_reconstructed_{donor_uid}_{cutter_uid}"
                 full_rec = create_sequence_record(full_seq, full_id)
                 full_rec.annotations["reconstruction_type"] = "full"
-                full_rec.annotations["original_uid"] = fragment_uid
+                full_rec.annotations["original_uid"] = donor_uid
                 full_rec.annotations["cutter_uid"] = cutter_uid
                 full_rec.annotations["left_uid"] = left_uid
                 full_rec.annotations["right_uid"] = right_uid
-                full_rec.annotations["reconstruction_depth"] = fragments_to_process.index(fragment_uid)
                 reconstructed.append(full_rec)
 
-                # 2. 不包含切割donor的清洁重建
+                # 2. 清洁重建 - 不包含切割donor (left + right)
                 clean_seq = left_seq + right_seq
-                clean_id = f"{seq_id}_clean_reconstructed_{fragment_uid}"
+                clean_id = f"{seq_id}_clean_reconstructed_{donor_uid}"
                 clean_rec = create_sequence_record(clean_seq, clean_id)
                 clean_rec.annotations["reconstruction_type"] = "clean"
-                clean_rec.annotations["original_uid"] = fragment_uid
+                clean_rec.annotations["original_uid"] = donor_uid
                 clean_rec.annotations["left_uid"] = left_uid
                 clean_rec.annotations["right_uid"] = right_uid
-                clean_rec.annotations["reconstruction_depth"] = fragments_to_process.index(fragment_uid)
                 reconstructed.append(clean_rec)
 
-                # 添加到排除集
-                excluded.update([fragment_uid, cutter_uid, left_uid, right_uid])
+                # 将相关UID添加到排除集合
+                excluded.update([donor_uid, cutter_uid, left_uid, right_uid])
+
+                # 处理完一个切割关系后转到下一个donor
+                break
 
         return reconstructed, excluded
 
@@ -1294,33 +1165,18 @@ class DonorNestingGraph:
             if donor_id:
                 label += f"\\nID: {donor_id}"
             label += fragment_info
-            
-            # 设置颜色 - 遵循与SequenceTree中相同的颜色逻辑
-            # 1. 默认donor为蓝色，其他为绿色
-            # 2. 切割片段为粉色
-            # 3. 有嵌套关系为黄色
-            # 4. 同时满足2和3为紫色
-            color = "#AAAAFF" if node_type == "Donor" else "#AAFFAA"  # donor为蓝色，其他为绿色
-            
+
+            # 设置颜色
+            # 默认donor为蓝色，其他为绿色
+            # 切割片段为粉色
+            color = "#AAAAFF" if node_type == "Donor" else "#AAFFAA"
+
             # 检查是否为切割片段
             if fragment_info:
                 color = "#FFAAAA"  # 切割片段为粉色
-            
-            # 检查是否有嵌套关系
-            has_nesting = uid in self.nested_in and self.nested_in[uid]
-            if has_nesting:
-                if fragment_info:  # 既有嵌套又是切割片段
-                    color = "#FFAAFF"  # 紫色(plum)
-                else:  # 只有嵌套关系
-                    color = "#FFFF77"  # 黄色
 
             lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
 
-        # 添加嵌套关系边
-        for container_uid, nested_list in self.nestings.items():
-            for nested_uid in nested_list:
-                lines.append(f'  node_{container_uid} -> node_{nested_uid} [label="contains", color="green", penwidth=2.0];')
-                
         # 添加切割关系边
         for cutter_uid, cut_list in self.cuts.items():
             for cut_uid, left_uid, right_uid in cut_list:
