@@ -1322,6 +1322,460 @@ class DonorNestingGraph:
             
         return reconstructed, success
 
+    def test_comprehensive_nesting(self):
+        """
+        全面测试多种复杂嵌套和切割情景，验证重建算法的正确性。
+        
+        测试包含多种场景:
+        - 单个插入
+        - 相邻位置插入
+        - 嵌套插入
+        - 多重嵌套
+        - 切割donor
+        - 多重切割
+        - 连锁切割
+        - 带TSD的插入
+        
+        Returns:
+            bool: 测试是否全部通过
+        """
+        # 重置图数据结构
+        self.__init__()
+        
+        test_results = []
+        
+        # ======== 场景1: 单个donor插入 ========
+        print("\n===== 测试场景1: 单个donor插入 =====")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGC", "original", 0)
+        
+        # 插入donor
+        self.add_node(2, "TTT", "donor1", 2)
+        
+        # 验证结果
+        expected_result = "没有重建(单个donor)"
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if not reconstructed:
+            test_results.append(("场景1", True, "单个donor插入，无需重建"))
+            print("✓ 场景1测试通过: 单个donor无需重建")
+        else:
+            test_results.append(("场景1", False, f"期望无重建，但得到了{len(reconstructed)}个重建"))
+            print(f"✗ 场景1测试失败: 期望无重建，但得到了{len(reconstructed)}个重建")
+        
+        # ======== 场景2: 相邻位置双重插入 ========
+        print("\n===== 测试场景2: 相邻位置双重插入 =====")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGC", "original", 0)
+        
+        # 插入donor1
+        self.add_node(2, "TTT", "donor1", 2)
+        
+        # 插入donor2(相邻位置)
+        self.add_node(3, "GGG", "donor2", 5)
+        
+        # 验证结果
+        expected_result = "没有重建(donors不相互影响)"
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if not reconstructed:
+            test_results.append(("场景2", True, "相邻位置插入，无需重建"))
+            print("✓ 场景2测试通过: 相邻位置donors无需重建")
+        else:
+            test_results.append(("场景2", False, f"期望无重建，但得到了{len(reconstructed)}个重建"))
+            print(f"✗ 场景2测试失败: 期望无重建，但得到了{len(reconstructed)}个重建")
+        
+        # ======== 场景3: 嵌套插入 ========
+        print("\n===== 测试场景3: 嵌套插入 =====")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGC", "original", 0)
+        
+        # 插入donor1
+        self.add_node(2, "TTTAAA", "donor1", 2)
+        
+        # 插入donor2(在donor1内部)
+        self.add_node(3, "GGG", "donor2", 5)
+        
+        # 添加切割关系
+        # donor2切割donor1，产生左右片段
+        left_uid = 4
+        right_uid = 5
+        self.add_node(left_uid, "TTT", None, 2)
+        self.add_node(right_uid, "AAA", None, 8)
+        self.add_cut_relation(3, 2, left_uid, right_uid)
+        
+        # 验证结果
+        expected_result = "donor1完整重建(TTTGGGAAA)"
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if reconstructed and len(reconstructed) >= 1:
+            # 验证完整重建
+            full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
+            if full_recon and len(full_recon) == 1:
+                # 提取第一个完整重建的序列
+                full_seq = str(full_recon[0].seq)
+                if full_seq == "TTTGGGAAA":
+                    test_results.append(("场景3", True, "嵌套插入重建正确"))
+                    print("✓ 场景3测试通过: 嵌套插入重建正确")
+                else:
+                    test_results.append(("场景3", False, f"期望完整重建为TTTGGGAAA，但得到了{full_seq}"))
+                    print(f"✗ 场景3测试失败: 期望完整重建为TTTGGGAAA，但得到了{full_seq}")
+            else:
+                test_results.append(("场景3", False, f"期望1个完整重建，但得到了{len(full_recon)}个"))
+                print(f"✗ 场景3测试失败: 期望1个完整重建，但得到了{len(full_recon)}个")
+        else:
+            test_results.append(("场景3", False, "期望至少1个重建，但没有获得任何重建"))
+            print("✗ 场景3测试失败: 期望至少1个重建，但没有获得任何重建")
+        
+        # ======== 场景4: 多重嵌套插入 ========
+        print("\n===== 测试场景4: 多重嵌套插入 =====")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGC", "original", 0)
+        
+        # 插入donor1
+        self.add_node(2, "TTTAAA", "donor1", 2)
+        
+        # 插入donor2(在donor1内部)
+        self.add_node(3, "GGCCC", "donor2", 5)
+        
+        # 插入donor3(在donor2内部)
+        self.add_node(4, "AAA", "donor3", 7)
+        
+        # 添加切割关系
+        # donor2切割donor1
+        left_uid1 = 5
+        right_uid1 = 6
+        self.add_node(left_uid1, "TTT", None, 2)
+        self.add_node(right_uid1, "AAA", None, 10)
+        self.add_cut_relation(3, 2, left_uid1, right_uid1)
+        
+        # donor3切割donor2
+        left_uid2 = 7
+        right_uid2 = 8
+        self.add_node(left_uid2, "GG", None, 5)
+        self.add_node(right_uid2, "CCC", None, 10)
+        self.add_cut_relation(4, 3, left_uid2, right_uid2)
+        
+        # 验证结果
+        expected_results = ["TTTGGAAACCCAAA", "GGAAACCC"]
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if reconstructed and len(reconstructed) >= 2:
+            # 获取所有完整重建
+            full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
+            
+            if len(full_recon) >= 2:
+                # 提取重建序列
+                recon_seqs = [str(r.seq) for r in full_recon]
+                
+                # 检查是否包含预期结果
+                has_donor1_recon = "TTTGGAAACCCAAA" in recon_seqs
+                has_donor2_recon = "GGAAACCC" in recon_seqs
+                
+                if has_donor1_recon and has_donor2_recon:
+                    test_results.append(("场景4", True, "多重嵌套插入重建正确"))
+                    print("✓ 场景4测试通过: 多重嵌套插入重建正确")
+                else:
+                    missing = []
+                    if not has_donor1_recon:
+                        missing.append("donor1(TTTGGAAACCCAAA)")
+                    if not has_donor2_recon:
+                        missing.append("donor2(GGAAACCC)")
+                    
+                    test_results.append(("场景4", False, f"未找到期望的重建: {', '.join(missing)}"))
+                    print(f"✗ 场景4测试失败: 未找到期望的重建: {', '.join(missing)}")
+                    print(f"实际重建序列: {recon_seqs}")
+            else:
+                test_results.append(("场景4", False, f"期望至少2个完整重建，但只得到了{len(full_recon)}个"))
+                print(f"✗ 场景4测试失败: 期望至少2个完整重建，但只得到了{len(full_recon)}个")
+        else:
+            test_results.append(("场景4", False, "期望至少2个重建，但获得的重建不足"))
+            print(f"✗ 场景4测试失败: 期望至少2个重建，但只得到了{len(reconstructed) if reconstructed else 0}个")
+        
+        # ======== 场景5: 切割donor ========
+        print("\n===== 测试场景5: 切割donor ========")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGC", "original", 0)
+        
+        # 插入donor1
+        self.add_node(2, "TTTAAA", "donor1", 2)
+        
+        # 插入donor2(切断donor1)
+        self.add_node(3, "GGG", "donor2", 4)
+        
+        # 添加切割关系
+        left_uid = 4
+        right_uid = 5
+        self.add_node(left_uid, "TT", None, 2)
+        self.add_node(right_uid, "TAAA", None, 7)
+        self.add_cut_relation(3, 2, left_uid, right_uid)
+        
+        # 验证结果
+        expected_full = "TTTGGGAAA"
+        expected_clean = "TTTAAA"
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if reconstructed and len(reconstructed) >= 2:
+            # 验证完整重建和清洁重建
+            full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
+            clean_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"]
+            
+            if full_recon and clean_recon:
+                full_seq = str(full_recon[0].seq)
+                clean_seq = str(clean_recon[0].seq)
+                
+                if full_seq == expected_full and clean_seq == expected_clean:
+                    test_results.append(("场景5", True, "切割donor重建正确"))
+                    print("✓ 场景5测试通过: 切割donor重建正确")
+                else:
+                    errors = []
+                    if full_seq != expected_full:
+                        errors.append(f"完整重建期望{expected_full}，得到{full_seq}")
+                    if clean_seq != expected_clean:
+                        errors.append(f"清洁重建期望{expected_clean}，得到{clean_seq}")
+                    
+                    test_results.append(("场景5", False, "; ".join(errors)))
+                    print(f"✗ 场景5测试失败: {'; '.join(errors)}")
+            else:
+                missing = []
+                if not full_recon:
+                    missing.append("完整重建")
+                if not clean_recon:
+                    missing.append("清洁重建")
+                
+                test_results.append(("场景5", False, f"缺少{' 和 '.join(missing)}"))
+                print(f"✗ 场景5测试失败: 缺少{' 和 '.join(missing)}")
+        else:
+            test_results.append(("场景5", False, "期望至少2个重建，但获得的重建不足"))
+            print(f"✗ 场景5测试失败: 期望至少2个重建，但只得到了{len(reconstructed) if reconstructed else 0}个")
+        
+        # ======== 场景6: 多重切割 ========
+        print("\n===== 测试场景6: 多重切割 =====")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGC", "original", 0)
+        
+        # 插入donor1
+        self.add_node(2, "TTTAAACCC", "donor1", 2)
+        
+        # 插入donor2(切断donor1)
+        self.add_node(3, "GGG", "donor2", 4)
+        
+        # 插入donor3(再次切断donor1)
+        self.add_node(4, "TTT", "donor3", 8)
+        
+        # 添加切割关系
+        # donor2切割donor1
+        left_uid1 = 5
+        right_uid1 = 6
+        self.add_node(left_uid1, "TT", None, 2)
+        self.add_node(right_uid1, "TAAACCC", None, 7)
+        self.add_cut_relation(3, 2, left_uid1, right_uid1)
+        
+        # donor3切割donor1的右半部分
+        left_uid2 = 7
+        right_uid2 = 8
+        self.add_node(left_uid2, "TAAA", None, 7)
+        self.add_node(right_uid2, "CCC", None, 11)
+        self.add_cut_relation(4, right_uid1, left_uid2, right_uid2)
+        
+        # 验证结果
+        expected_clean = "TTTAAACCC"
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if reconstructed:
+            # 验证清洁重建
+            clean_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"]
+            
+            if clean_recon:
+                clean_seq = str(clean_recon[0].seq)
+                
+                if clean_seq == expected_clean:
+                    test_results.append(("场景6", True, "多重切割donor清洁重建正确"))
+                    print("✓ 场景6测试通过: 多重切割donor清洁重建正确")
+                    
+                    # 检查多重切割标记
+                    if clean_recon[0].annotations.get("multiple_cuts"):
+                        print("  ✓ 正确标记为多重切割")
+                    else:
+                        print("  ✗ 未正确标记为多重切割")
+                else:
+                    test_results.append(("场景6", False, f"清洁重建期望{expected_clean}，得到{clean_seq}"))
+                    print(f"✗ 场景6测试失败: 清洁重建期望{expected_clean}，得到{clean_seq}")
+            else:
+                test_results.append(("场景6", False, "缺少清洁重建"))
+                print("✗ 场景6测试失败: 缺少清洁重建")
+        else:
+            test_results.append(("场景6", False, "期望至少1个重建，但没有获得任何重建"))
+            print("✗ 场景6测试失败: 期望至少1个重建，但没有获得任何重建")
+        
+        # ======== 场景7: 连锁切割 ========
+        print("\n===== 测试场景7: 连锁切割 =====")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGC", "original", 0)
+        
+        # 插入donor1
+        self.add_node(2, "TTTAAA", "donor1", 2)
+        
+        # 插入donor2(切断donor1)
+        self.add_node(3, "GGGCCC", "donor2", 4)
+        
+        # 插入donor3(切断donor2)
+        self.add_node(4, "AAA", "donor3", 6)
+        
+        # 添加切割关系
+        # donor2切割donor1
+        left_uid1 = 5
+        right_uid1 = 6
+        self.add_node(left_uid1, "TT", None, 2)
+        self.add_node(right_uid1, "TAAA", None, 10)
+        self.add_cut_relation(3, 2, left_uid1, right_uid1)
+        
+        # donor3切割donor2
+        left_uid2 = 7
+        right_uid2 = 8
+        self.add_node(left_uid2, "GG", None, 4)
+        self.add_node(right_uid2, "GCCC", None, 9)
+        self.add_cut_relation(4, 3, left_uid2, right_uid2)
+        
+        # 验证结果
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if reconstructed and len(reconstructed) >= 3:
+            full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
+            clean_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"]
+            
+            # 应该有2个完整重建(donor1和donor2各一个)和2个清洁重建
+            if len(full_recon) >= 2 and len(clean_recon) >= 2:
+                test_results.append(("场景7", True, "连锁切割重建正确"))
+                print("✓ 场景7测试通过: 连锁切割重建正确")
+            else:
+                test_results.append(("场景7", False, f"期望至少2个完整重建和2个清洁重建，但得到{len(full_recon)}个完整重建和{len(clean_recon)}个清洁重建"))
+                print(f"✗ 场景7测试失败: 期望至少2个完整重建和2个清洁重建，但得到{len(full_recon)}个完整重建和{len(clean_recon)}个清洁重建")
+        else:
+            test_results.append(("场景7", False, "期望至少3个重建，但获得的重建不足"))
+            print(f"✗ 场景7测试失败: 期望至少3个重建，但只得到了{len(reconstructed) if reconstructed else 0}个")
+        
+        # ======== 场景8: 首尾插入边界情况 ========
+        print("\n===== 测试场景8: 首尾插入边界情况 =====")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGC", "original", 0)
+        
+        # 在序列起始位置插入donor
+        self.add_node(2, "TTT", "donor1", 1)
+        
+        # 在序列末尾插入donor
+        self.add_node(3, "GGG", "donor2", 7)
+        
+        # 验证结果
+        expected_result = "没有重建(无嵌套或切割)"
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if not reconstructed:
+            test_results.append(("场景8", True, "首尾插入边界情况正确处理"))
+            print("✓ 场景8测试通过: 首尾插入边界情况正确处理")
+        else:
+            test_results.append(("场景8", False, f"期望无重建，但得到了{len(reconstructed)}个重建"))
+            print(f"✗ 场景8测试失败: 期望无重建，但得到了{len(reconstructed)}个重建")
+        
+        # ======== 场景9: 同一位置多个插入 ========
+        print("\n===== 测试场景9: 同一位置多个插入 =====")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGC", "original", 0)
+        
+        # 在同一位置插入两个donor
+        self.add_node(2, "TTT", "donor1", 2)
+        self.add_node(3, "GGG", "donor2", 2)
+        
+        # 验证结果 - 这种情况下，后插入的donor会出现在序列中最前面(会应用相反的顺序)
+        expected_result = "没有重建(无嵌套或切割)"
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if not reconstructed:
+            test_results.append(("场景9", True, "同一位置多个插入正确处理"))
+            print("✓ 场景9测试通过: 同一位置多个插入正确处理")
+        else:
+            test_results.append(("场景9", False, f"期望无重建，但得到了{len(reconstructed)}个重建"))
+            print(f"✗ 场景9测试失败: 期望无重建，但得到了{len(reconstructed)}个重建")
+        
+        # ======== 场景10: 随机多donor复杂网络 ========
+        print("\n===== 测试场景10: 随机多donor复杂网络 =====")
+        self.__init__()  # 重置图
+        
+        # 创建初始序列节点
+        self.add_node(1, "ATGCATGCATGC", "original", 0)
+        
+        # 插入多个相互切割的donor
+        self.add_node(2, "AAATTT", "donor1", 3)
+        self.add_node(3, "CCCGGG", "donor2", 5)
+        self.add_node(4, "TTTAAA", "donor3", 8)
+        self.add_node(5, "GGGCCC", "donor4", 10)
+        
+        # 添加复杂的切割关系
+        # donor2切割donor1
+        left_uid1 = 6
+        right_uid1 = 7
+        self.add_node(left_uid1, "AA", None, 3)
+        self.add_node(right_uid1, "ATTT", None, 8)
+        self.add_cut_relation(3, 2, left_uid1, right_uid1)
+        
+        # donor3切割donor2
+        left_uid2 = 8
+        right_uid2 = 9
+        self.add_node(left_uid2, "CCC", None, 5)
+        self.add_node(right_uid2, "GGG", None, 14)
+        self.add_cut_relation(4, 3, left_uid2, right_uid2)
+        
+        # donor4切割donor3
+        left_uid3 = 10
+        right_uid3 = 11
+        self.add_node(left_uid3, "TTT", None, 8)
+        self.add_node(right_uid3, "AAA", None, 16)
+        self.add_cut_relation(5, 4, left_uid3, right_uid3)
+        
+        # 验证结果 - 在这种复杂网络中，应该能够正确重建所有donor
+        reconstructed, _ = self.reconstruct_donors("test")
+        
+        if reconstructed and len(reconstructed) >= 4: # 应该有至少4个重建
+            test_results.append(("场景10", True, "随机多donor复杂网络正确处理"))
+            print("✓ 场景10测试通过: 随机多donor复杂网络正确处理")
+        else:
+            test_results.append(("场景10", False, f"期望至少4个重建，但只得到了{len(reconstructed) if reconstructed else 0}个"))
+            print(f"✗ 场景10测试失败: 期望至少4个重建，但只得到了{len(reconstructed) if reconstructed else 0}个")
+        
+        # ======== 显示最终测试结果 ========
+        print("\n===== 综合测试结果 =====")
+        passed = sum(1 for _, result, _ in test_results if result)
+        total = len(test_results)
+        
+        print(f"测试完成: {passed}/{total} 通过")
+        if passed == total:
+            print("✓ 所有场景测试通过！重建算法工作正常")
+        else:
+            print("✗ 部分测试未通过，请检查重建算法")
+            for name, result, message in test_results:
+                if not result:
+                    print(f"  - {name}: {message}")
+        
+        return passed == total
+
 # ======================================================================================================================
 # Utility Functions
 
@@ -1967,6 +2421,8 @@ def main():
     test_group = parser.add_argument_group("Testing Options")
     test_group.add_argument("--test-multiple-cuts", action="store_true",
                        help="运行多重切割测试，验证重建算法在处理多个切割关系时的表现。")
+    test_group.add_argument("--test-comprehensive", action="store_true",
+                       help="运行全面综合测试，验证重建算法在各种复杂插入和嵌套场景下的表现。")
 
     parsed_args = parser.parse_args()
     
@@ -1975,6 +2431,13 @@ def main():
         print("\n=== 运行多重切割测试 ===")
         test_graph = DonorNestingGraph()
         test_graph.test_multiple_cuts()
+        return
+    
+    # 如果启用了综合测试功能，执行综合测试
+    if parsed_args.test_comprehensive:
+        print("\n=== 运行全面综合测试 ===")
+        test_graph = DonorNestingGraph()
+        test_graph.test_comprehensive_nesting()
         return
     
     generator = SeqGenerator(
