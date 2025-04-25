@@ -2416,7 +2416,7 @@ def main():
                        help="Use recursive insertion method instead of iterative one.")
     flag_group.add_argument("--debug", action="store_true",
                        help="Enable debug mode to print detailed information about the nesting graph.")
-    
+
     # 添加测试标志
     test_group = parser.add_argument_group("Testing Options")
     test_group.add_argument("--test-multiple-cuts", action="store_true",
@@ -2425,21 +2425,21 @@ def main():
                        help="运行全面综合测试，验证重建算法在各种复杂插入和嵌套场景下的表现。")
 
     parsed_args = parser.parse_args()
-    
+
     # 如果启用了测试功能，执行测试
     if parsed_args.test_multiple_cuts:
         print("\n=== 运行多重切割测试 ===")
         test_graph = DonorNestingGraph()
         test_graph.test_multiple_cuts()
         return
-    
+
     # 如果启用了综合测试功能，执行综合测试
     if parsed_args.test_comprehensive:
         print("\n=== 运行全面综合测试 ===")
         test_graph = DonorNestingGraph()
         test_graph.test_comprehensive_nesting()
         return
-    
+
     generator = SeqGenerator(
         input_file=parsed_args.input,
         insertion=parsed_args.insert,
