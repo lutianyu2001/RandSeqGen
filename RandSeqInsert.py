@@ -367,11 +367,13 @@ class SequenceTree:
         self.node_dict[uid] = node
         return node
 
-    def insert(self, abs_position: int, donor_seq: str, donor_id: str = None, tsd_length: int = 0, recursive: bool = False, debug: bool = False) -> None:
+    def insert(self, abs_position: int, donor_seq: str, donor_id: str = None, tsd_length: int = 0,
+               recursive: bool = False, debug: bool = False) -> None:
         """
         Insert a donor sequence at the specified position.
 
         Args:
+            debug:
             abs_position (int): Absolute position for insertion (1-based)
             donor_seq (str): Donor sequence to insert
             donor_id (str): Identifier for the donor sequence
@@ -2036,16 +2038,17 @@ def _load_multiple_donor_libs(path_list: List[str], weight_list: Optional[List[f
 # Main Sequence Generator Class
 
 class SeqGenerator:
-    def __init__(self, input_file: str, insertion: Union[str, int], batch: int, processors: int, output_dir_path: str,
+    def __init__(self, input: str, insertion: Optional[Union[str, int]] = None, batch: int = 1,
+                 processors: int = DEFAULT_ALLOCATED_CPU_CORES, output_dir_path: str = None,
                  donor_lib: Optional[List[str]] = None, donor_lib_weight: Optional[List[float]] = None,
                  donor_len_limit: Optional[int] = None, flag_filter_n: bool = False, flag_track: bool = False,
-                 tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False, 
+                 tsd_length: Optional[int] = None, flag_visual: bool = False, flag_recursive: bool = False,
                  iteration: int = 1, flag_debug: bool = False):
         """
         Initialize the sequence generator.
 
         Args:
-            input_file: Path to the input sequence file
+            input: Path to the input sequence file
             insertion: Number of insertions per sequence
             batch: Number of independent result files to generate
             processors: Number of processors to use
@@ -2061,7 +2064,7 @@ class SeqGenerator:
             iteration: Number of insertion iterations to perform on each sequence
             flag_debug: Whether to enable debug mode
         """
-        self.input_file: str = input_file
+        self.input: str = input
         self.insertion: int = convert_humanized_int(insertion)
         self.batch: int = batch
         self.processors: int = processors
@@ -2077,11 +2080,11 @@ class SeqGenerator:
 
         # Load input sequence
         try:
-            self.input: List[SeqRecord] = list(SeqIO.parse(input_file, "fasta"))
+            self.input: List[SeqRecord] = list(SeqIO.parse(input, "fasta"))
             if not self.input:
-                raise ValueError(f"No sequences found in input file {input_file}")
+                raise ValueError(f"No sequences found in input file {input}")
         except (FileNotFoundError, IOError) as e:
-            raise ValueError(f"Error loading input file {input_file}: {str(e)}")
+            raise ValueError(f"Error loading input file {input}: {str(e)}")
 
         # Load donor sequences
         if not donor_lib:
@@ -2106,7 +2109,7 @@ class SeqGenerator:
         Print the program header with basic information.
         """
         print(f"=== RandSeqInsert {VERSION} ===")
-        print(f"Processing input file: {self.input_file}")
+        print(f"Processing input file: {self.input}")
         print(f"Number of input sequences: {len(self.input)}")
         print(f"Insertion settings: {self.insertion} insertions per sequence")
         if self.iteration > 1:
@@ -2126,8 +2129,8 @@ class SeqGenerator:
         """
         Perform pre-execution checks.
         """
-        if not os.path.exists(self.output_dir_path):
-            os.makedirs(self.output_dir_path)
+        if self.insertion ^ self.donor_sequences:
+            raise ValueError("\"insertion\" and \"donor_sequences\" must be specified or not specified at the same time")
 
     def __process_batch_multiprocessing(self) -> Tuple[List[SeqRecord], 
                                                       Optional[List[SeqRecord]],
@@ -2382,24 +2385,24 @@ def main():
 
     core_group.add_argument("-is", "--insert", metavar="INT/STR",
                        help="Number of insertions per sequence. Accepts either a plain number (e.g., 100) or a string with k/m suffix (e.g., 1k, 1m).",
-                       type=str, required=True)
+                       type=str)
     core_group.add_argument("-it", "--iteration", type=int, default=1, metavar="INT",
                             help="Number of insertion iterations to perform on each sequence. Each iteration will use the sequence from the previous iteration as input. Default: 1")
 
     # Donor Library Arguments
     donor_group = parser.add_argument_group("Donor Library Arguments")
-    donor_group.add_argument("-d", "--donor", nargs="+", metavar="FILE/DIR", required=True,
+    donor_group.add_argument("-d", "--donor", nargs="+", metavar="FILE/DIR",
                             help="Donor sequence library file or directory paths. Multiple FASTA format donor files can be specified. Sequences from these files will be selected and inserted into the acceptor sequences.")
     donor_group.add_argument("-w", "--weight", type=float, nargs="+", metavar="FLOAT",
                        help="Weights for donor libraries. Controls the probability of selecting sequences from different donor libraries. The number of weights should match the number of donor libraries.")
-    donor_group.add_argument("-l", "--limit", type=int, default=None, metavar="INT",
+    donor_group.add_argument("-l", "--limit", default=None, type=int, metavar="INT",
                        help="Donor sequence length limit. Only loads donor sequences with length less than or equal to this value. Default: no limit.")
 
     # Control Arguments
     ctrl_group = parser.add_argument_group("Control Arguments")
-    ctrl_group.add_argument("-b", "--batch", type=int, default=1, metavar="INT",
+    ctrl_group.add_argument("-b", "--batch", default=1, type=int, metavar="INT",
                             help="Number of independent result files to generate. Runs the entire process multiple times with different random seeds to generate multiple output sets. Default: 1")
-    ctrl_group.add_argument("-p", "--processors", type=int, default=DEFAULT_ALLOCATED_CPU_CORES, metavar="INT",
+    ctrl_group.add_argument("-p", "--processors", default=DEFAULT_ALLOCATED_CPU_CORES, type=int, metavar="INT",
                        help=f"Number of processors to use for parallel processing. Default: {DEFAULT_ALLOCATED_CPU_CORES}")
 
     # Flags
@@ -2441,7 +2444,7 @@ def main():
         return
 
     generator = SeqGenerator(
-        input_file=parsed_args.input,
+        input=parsed_args.input,
         insertion=parsed_args.insert,
         batch=parsed_args.batch,
         processors=parsed_args.processors,
