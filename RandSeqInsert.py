@@ -17,7 +17,7 @@ Date: 2024-11-27
 import os
 import argparse
 import random
-from typing import Tuple, List, Union, Optional
+from typing import Tuple, List, Union, Optional, Iterable
 import multiprocessing as mp
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
@@ -159,6 +159,7 @@ def _load_multiple_donor_libs(path_list: List[str], weight_list: Optional[List[f
 # Main Sequence Generator Class
 
 class SeqGenerator:
+    # noinspection PyShadowingBuiltins
     def __init__(self, input: str, insertion: Optional[Union[str, int]] = None, batch: int = 1,
                  processors: int = DEFAULT_ALLOCATED_CPU_CORES, output_dir_path: str = None,
                  donor_lib: Optional[List[str]] = None, donor_lib_weight: Optional[List[float]] = None,
@@ -232,7 +233,6 @@ class SeqGenerator:
         Print the program header with basic information.
         """
         print(f"=== RandSeqInsert {VERSION} ===")
-        print(f"Processing input file: {self.input}")
         print(f"Number of input sequences: {len(self.input)}")
         print(f"Insertion settings: {self.insertion} insertions per sequence")
         if self.iteration > 1:
@@ -254,26 +254,30 @@ class SeqGenerator:
         """
         Perform pre-execution checks.
         """
-        if self.insertion ^ self.donor_sequences:
+        if bool(self.insertion) ^ bool(self.donor_sequences):
             raise ValueError("\"insertion\" and \"donor_sequences\" must be specified or not specified at the same time")
 
-    def __process_batch_multiprocessing(self) -> Tuple[List[SeqRecord], 
-                                                      Optional[List[SeqRecord]],
-                                                      Optional[List[SeqRecord]]]:
+    def __process_single_batch_multiprocessing(self, batch_num, seed: int = None) -> Optional[float]:
         """
-        Process a batch of sequences using multiprocessing.
+        Process a single batch of sequences using multiprocessing.
+
+        Args:
+            batch_num: Batch number (starting from 1)
 
         Returns:
-            Tuple containing:
-                - All processed sequences
-                - Donor records (if tracking enabled)
-                - Reconstructed donor records (if tracking enabled)
+            float: Time taken to process this batch (seconds)
         """
+
         if not self.input:
-            return [], None, None
+            return None
+
+        batch_start_time = time.time()
 
         total_sequences = len(self.input)
-        item_indices = list(range(total_sequences))
+        if seed:
+            mp_args_gen = ((i, seed + i) for i in range(total_sequences))
+        else:
+            mp_args_gen = list(range(total_sequences))
 
         print(f"Using multiprocessing with {self.processors} worker processes to process {total_sequences} sequences")
 
@@ -282,7 +286,7 @@ class SeqGenerator:
         all_reconstructed_donors = [] if self.flag_track else None
 
         with mp.Pool(self.processors) as pool:
-            results = pool.map(self._process_single_sequence, item_indices)
+            results = pool.imap_unordered(self._imap_worker_process_single_sequence, mp_args_gen, chunksize=1)
 
             for i, (processed_seq, donors, reconstructed) in enumerate(results, 1):
                 all_sequences.append(processed_seq)
@@ -295,9 +299,18 @@ class SeqGenerator:
                 if i % 10 == 0 or i == total_sequences:
                     print(f"Completed {i}/{total_sequences} sequences")
 
-        return all_sequences, all_donors, all_reconstructed_donors
+        os.makedirs(self.output_dir_path, exist_ok=True)
+        print(f"Output directory: {self.output_dir_path}")
+        self.__save_batch_results(self.output_dir_path, all_sequences, all_donors, all_reconstructed_donors, batch_num)
 
-    def _process_single_sequence(self, idx_or_record) -> Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]]]:
+        return time.time() - batch_start_time
+
+    def _imap_worker_process_single_sequence(self, args):
+        if isinstance(args, Iterable):
+            return self.__process_single_sequence(*args)
+        return self.__process_single_sequence(args)
+
+    def __process_single_sequence(self, idx_or_record, seed = None) -> Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]]]:
         """
         Process a single sequence with random insertions, potentially over multiple iterations.
 
@@ -310,12 +323,6 @@ class SeqGenerator:
                 - Used donors (if tracking enabled)
                 - Reconstructed donors (if tracking enabled)
         """
-        if self.seed:
-            random.seed(self.seed)
-        else:
-            # Use time-based seed for non-deterministic behavior
-            random.seed(time.perf_counter_ns())
-
         # If idx_or_record is an integer, retrieve the sequence record
         # If it's already a SeqRecord, use it directly
         if isinstance(idx_or_record, int):
@@ -325,16 +332,20 @@ class SeqGenerator:
 
         # Check if there are donor sequences to insert
         if not self.insertion or not self.donor_sequences:
-            # If no insertions requested or no donor sequences available,
-            # return the original sequence with modified ID
-            new_id = f"{seq_record.id}_ins0"
-            return create_sequence_record(str(seq_record.seq), new_id), None, None
+            # If no insertions requested or no donor sequences available, return the original sequence
+            return seq_record, None, None
 
         # Create a new sequence tree for this sequence
         seq_tree = SequenceTree(str(seq_record.seq), 0)
         # Track all used donors across iterations if tracking is enabled
         all_used_donors = [] if self.flag_track else None
         all_reconstructed_donors = [] if self.flag_track else None
+
+        # Set the seed for random
+        if not seed:
+            seed = time.perf_counter_ns()
+        random.seed(seed)
+        print(f"[DEBUG] Random seed for {seq_record.id}: [{seed}]")
 
         # Perform multiple iterations of insertion
         for iteration in range(1, self.iteration + 1):
@@ -405,12 +416,13 @@ class SeqGenerator:
 
         # Process each batch
         for batch_num in range(1, self.batch + 1):
-            self.__process_single_batch(batch_num)
+            print(f"Processing batch {batch_num}/{self.batch}")
+            seed = (self.seed + batch_num) if self.seed else None
+            batch_elapsed_time = self.__process_single_batch_multiprocessing(batch_num, seed)
+            print(f"Batch {batch_num} completed in {batch_elapsed_time:.2g} seconds")
 
         # Print summary
-        end_time = time.time()
-        total_elapsed_time = end_time - start_time
-        self.__print_summary(total_elapsed_time)
+        self.__print_summary(time.time() - start_time)
 
     def __print_summary(self, total_elapsed_time: float):
         """
@@ -421,42 +433,6 @@ class SeqGenerator:
         """
         print(f"\nAll batches completed in {total_elapsed_time:.2g} seconds")
         print(f"Results saved to \"{os.path.abspath(self.output_dir_path)}\"")
-
-    def __process_single_batch(self, batch_num: int) -> float:
-        """
-        Process a single batch of sequences.
-
-        Args:
-            batch_num: Batch number (starting from 1)
-
-        Returns:
-            float: Time taken to process this batch (seconds)
-        """
-        batch_start_time = time.time()
-
-        # Set random seed for this batch
-        if self.seed:
-            # Use the seed plus batch number to get different but reproducible results for each batch
-            random.seed(self.seed + batch_num)
-        else:
-            # Otherwise use a time-based seed for randomness
-            random.seed(time.perf_counter_ns() + batch_num)
-
-        print(f"\nProcessing batch {batch_num}/{self.batch}")
-
-        # Choose processing method
-        all_sequences, all_donors, all_reconstructed_donors = self.__process_batch_multiprocessing()
-
-        os.makedirs(self.output_dir_path, exist_ok=True)
-        print(f"Output directory: {self.output_dir_path}")
-
-        # Save results
-        self.__save_batch_results(self.output_dir_path, all_sequences, all_donors, all_reconstructed_donors, batch_num)
-
-        batch_elapsed_time = time.time() - batch_start_time
-        print(f"Batch {batch_num} completed in {batch_elapsed_time:.2g} seconds")
-
-        return batch_elapsed_time
 
     def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], 
                              donors: Optional[List[SeqRecord]], 
