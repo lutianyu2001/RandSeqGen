@@ -1128,54 +1128,81 @@ class DonorNestingGraph:
 
     def to_graphviz_dot(self) -> str:
         """
-        生成Graphviz DOT格式可视化，改进版本能够区分多次切割的片段
+        生成Graphviz DOT格式可视化
 
         Returns:
             str: Graphviz DOT格式字符串
         """
-        lines = ["digraph DonorNestingGraph {",
+        # 初始化DOT头部
+        dot_header = ["digraph DonorNestingGraph {",
                  "  bgcolor=\"#FFFFFF\";",
                  "  node [shape=box, style=filled, fontsize=10];"]
-
-        # 添加所有节点
-        for uid, info in self.nodes.items():
-            node_type = "Donor"
-            fragment_info = ""
-            if self.is_fragment(uid):
-                orig_uid, pos, is_left, cutter_uid = self.fragments[uid]
-                
-                # 添加更详细的片段信息
-                fragment_info = f"\\nFragment of {orig_uid}"
-                node_type = "Fragment"
-
-            # 安全获取节点长度
-            length = info.get('length', 0)
-            position = info.get('position', 'N/A')
-
-            # 创建标签，包含更多信息
-            label = f"{node_type}\\nUID: {uid}\\nLen: {length}"
-            if position != 'N/A' and not self.is_fragment(uid):
-                label += f"\\nPos: {position}"
-            label += fragment_info
-
-            # 默认donor为蓝色，其他为绿色
-            color = "#AAAAFF" if node_type == "Donor" else "#AAFFAA"
-
-            # 切割片段为粉色
-            if self.is_fragment(uid):
-                color = "#FFAAAA"  # 切割片段为粉色
-
-            lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
-
-        # 添加切割关系边
+        
+        # 收集用到的节点
+        used_nodes = set()
+        edge_lines = []
+        
+        # 添加切割关系边，同时收集用到的节点
         for cutter_uid, cut_list in self.cuts.items():
             for cut_uid, left_uid, right_uid in cut_list:
+                # 收集用到的节点
+                used_nodes.add(cutter_uid)
+                used_nodes.add(cut_uid)
+                used_nodes.add(left_uid)
+                used_nodes.add(right_uid)
+                
                 # 添加切割者到被切割者的边
-                lines.append(f'  node_{cutter_uid} -> node_{cut_uid} [label="cuts", color="red", penwidth=2.0];')
+                edge_lines.append(f'  node_{cutter_uid} -> node_{cut_uid} [label="cuts", color="red", penwidth=2.0];')
                 
                 # 添加被切割者到左右片段的边，添加切割者信息
-                lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="L\\nby {cutter_uid}", style="dashed", color="blue"];')
-                lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="R\\nby {cutter_uid}", style="dashed", color="blue"];')
+                edge_lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="L\\nby {cutter_uid}", style="dashed", color="blue"];')
+                edge_lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="R\\nby {cutter_uid}", style="dashed", color="blue"];')
+        
+        # 只为用到的节点生成节点代码
+        node_lines = []
+        for uid in used_nodes:
+            if uid in self.nodes:
+                info = self.nodes[uid]
+                
+                node_type = "Donor"
+                fragment_info = ""
+                
+                # 默认节点为浅绿色
+                color = "lightgreen"
+                
+                # 根据节点类型设置颜色
+                if uid in self.cuts:
+                    # 是切割者，用moccasin
+                    color = "moccasin"
+                    node_type = "Cutter"
+                elif self.is_fragment(uid):
+                    orig_uid, pos, is_left, cutter_uid = self.fragments[uid]
+                    
+                    # 添加片段信息
+                    fragment_info = f"\\nfrom {orig_uid}"
+                    
+                    # 根据片段设置颜色
+                    if is_left:
+                        color = "lightblue"
+                        node_type = "L Fragment"
+                    else:
+                        color = "lightpink"
+                        node_type = "R Fragment"
 
-        lines.append("}")
-        return '\n'.join(lines)
+                # 安全获取节点长度
+                length = info.get('length', 0)
+                position = info.get('position', 'N/A')
+
+                # 创建标签
+                label = f"{node_type}\\nUID: {uid}\\nLen: {length}"
+                if position != 'N/A' and not self.is_fragment(uid):
+                    label += f"\\nPos: {position}"
+                label += fragment_info
+
+                node_lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
+        
+        # 按照先节点后路径的顺序构造最终dot字符串
+        dot_body = node_lines + edge_lines
+        dot_footer = ["}"]
+        
+        return '\n'.join(dot_header + dot_body + dot_footer)
