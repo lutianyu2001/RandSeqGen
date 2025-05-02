@@ -242,7 +242,7 @@ class SeqGenerator:
         print(f"Donor library: {len(self.donor_sequences)} sequences loaded")
         print(f"Generating {self.batch} independent result file(s)")
         if self.seed is not None:
-            print(f"Random seed: {self.seed} (results will be reproducible)")
+            print(f"Seed: {self.seed}")
         if self.flag_recursive:
             print(f"Using recursive insertion method")
         if self.flag_visual:
@@ -345,7 +345,8 @@ class SeqGenerator:
         if not seed:
             seed = time.perf_counter_ns()
         random.seed(seed)
-        print(f"[DEBUG] Random seed for {seq_record.id}: [{seed}]")
+        if self.flag_debug:
+            print(f"[DEBUG] Seed for {seq_record.id}: [{seed}]")
 
         # Perform multiple iterations of insertion
         for iteration in range(1, self.iteration + 1):

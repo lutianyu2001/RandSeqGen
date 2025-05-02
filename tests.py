@@ -1103,13 +1103,126 @@ def test_comprehensive_nesting():
     return passed == total
 
 
-if __name__ == "__main__":
-    # 执行测试
-    print("\n===== 执行多重切割测试 =====")
-    _, success1 = test_multiple_cuts()
+def test_multiple_cuts_fragments_distinction():
+    """
+    测试多重切割情况下片段区分功能的改进
+    验证在一个节点被多次切割的情况下，能否正确区分不同切割者产生的片段
     
-    print("\n===== 执行综合嵌套测试 =====")
+    Returns:
+        bool: 测试是否成功
+    """
+    print("\n===== 测试多重切割片段区分功能 =====")
+    
+    # 初始化图数据结构
+    graph = DonorNestingGraph()
+
+    # 创建一个被多次切割的场景
+    # 原始donor (UID 1) 被三个不同的donor切割：
+    # - donor 2 切割在位置10，生成片段3和4
+    # - donor 5 切割在位置20，生成片段6和7
+    # - donor 8 切割在位置30，生成片段9和10
+    original_seq = "ATGCATGCATGCATGCATGCATGCATGCATGCATGC"
+    first_cutter = "GTACGTAC"
+    second_cutter = "CCGGAATT"
+    third_cutter = "TTAGGCCA"
+    
+    # 创建所有节点
+    graph.add_node(1, original_seq, "original", 0)
+    # 切割者1
+    graph.add_node(2, first_cutter, "cutter1", 10)
+    graph.add_node(3, original_seq[:10], None, 0)  # 左片段1
+    graph.add_node(4, original_seq[10:], None, 18)  # 右片段1
+    # 切割者2
+    graph.add_node(5, second_cutter, "cutter2", 20)
+    graph.add_node(6, original_seq[:20], None, 0)  # 左片段2
+    graph.add_node(7, original_seq[20:], None, 28)  # 右片段2
+    # 切割者3
+    graph.add_node(8, third_cutter, "cutter3", 30)
+    graph.add_node(9, original_seq[:30], None, 0)  # 左片段3
+    graph.add_node(10, original_seq[30:], None, 38)  # 右片段3
+    
+    # 添加切割关系
+    graph.add_cut_relation(2, 1, 3, 4)  # 切割者1切割原始donor
+    graph.add_cut_relation(5, 1, 6, 7)  # 切割者2切割原始donor
+    graph.add_cut_relation(8, 1, 9, 10)  # 切割者3切割原始donor
+    
+    # 测试片段区分功能
+    success = True
+    
+    # 1. 验证片段信息是否包含切割者信息
+    for fragment_uid in [3, 4, 6, 7, 9, 10]:
+        fragment_info = graph.fragments.get(fragment_uid)
+        if not fragment_info or len(fragment_info) != 4:
+            print(f"错误: 片段 {fragment_uid} 的信息不完整，应包含四元组(original_uid, position, is_left, cutter_uid)")
+            success = False
+            continue
+        
+        orig_uid, pos, is_left, cutter_uid = fragment_info
+        print(f"片段 {fragment_uid}: 来自 {orig_uid}, "
+              f"位置 {pos}, {'左' if is_left else '右'}侧, 切割者 {cutter_uid}")
+        
+        # 验证切割者映射
+        if graph.fragment_to_cutter.get(fragment_uid) != cutter_uid:
+            print(f"错误: 片段 {fragment_uid} 的切割者映射不正确")
+            success = False
+    
+    # 2. 验证每个原始donor的片段集合是否完整
+    all_fragments = graph.get_all_fragments(1)
+    if set(all_fragments) != {3, 4, 6, 7, 9, 10}:
+        print(f"错误: get_all_fragments(1) 应返回所有6个片段，但返回了 {all_fragments}")
+        success = False
+    
+    # 3. 验证按切割者筛选片段的功能
+    fragments_by_cutter1 = graph.get_fragments_by_cutter(1, 2)
+    fragments_by_cutter2 = graph.get_fragments_by_cutter(1, 5)
+    fragments_by_cutter3 = graph.get_fragments_by_cutter(1, 8)
+    
+    if set(fragments_by_cutter1) != {3, 4}:
+        print(f"错误: 切割者1的片段应该是 {{3, 4}}，但得到 {fragments_by_cutter1}")
+        success = False
+    
+    if set(fragments_by_cutter2) != {6, 7}:
+        print(f"错误: 切割者2的片段应该是 {{6, 7}}，但得到 {fragments_by_cutter2}")
+        success = False
+    
+    if set(fragments_by_cutter3) != {9, 10}:
+        print(f"错误: 切割者3的片段应该是 {{9, 10}}，但得到 {fragments_by_cutter3}")
+        success = False
+    
+    # 4. 生成DOT可视化并验证
+    dot_str = graph.to_graphviz_dot()
+    
+    # 检查DOT字符串中是否包含切割者信息
+    if "by 2" not in dot_str or "by 5" not in dot_str or "by 8" not in dot_str:
+        print("错误: DOT可视化中应包含切割者信息")
+        success = False
+    
+    if success:
+        print("✓ 多重切割片段区分功能测试通过!")
+    else:
+        print("✗ 多重切割片段区分功能测试失败!")
+    
+    return success
+
+
+# 如果作为主程序运行，执行所有测试
+if __name__ == "__main__":
+    print("执行测试...")
+    
+    # 执行多重切割测试
+    success1 = test_multiple_cuts()
+    if not success1:
+        print("  - 多重切割测试未通过")
+        
+    # 执行综合嵌套测试
     success2 = test_comprehensive_nesting()
+    if not success2:
+        print("  - 综合嵌套测试未通过") 
+        
+    # 执行多次切割片段区分功能测试
+    success3 = test_multiple_cuts_fragments_distinction()
+    if not success3:
+        print("  - 多次切割片段区分功能测试未通过")
     
     # 显示总体测试结果
     print("\n===== 总体测试结果 =====")

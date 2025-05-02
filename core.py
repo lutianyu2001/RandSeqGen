@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 # Tianyu (Sky) Lu (tianyu@lu.fm)
 
-import random
 from typing import Tuple, List, Dict, Optional
 from Bio.SeqRecord import SeqRecord
 
@@ -321,7 +320,6 @@ class SequenceTree:
             right_data = node.data[rel_pos:]
 
             # Handle TSD generation
-            tsd_5 = tsd_3 = ""
             if tsd_length > 0:
                 # Extract source TSD sequence from the original sequence
                 source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
@@ -461,7 +459,6 @@ class SequenceTree:
                 right_data = current.data[rel_pos:]
 
                 # Handle TSD generation
-                tsd_5 = tsd_3 = ""
                 if tsd_length > 0:
                     # Extract source TSD sequence from the original sequence
                     source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
@@ -740,12 +737,12 @@ class SequenceTree:
 
         # Check if this is a fragment of a cut donor
         if self.nesting_graph.is_fragment(node.uid):
-            # Get fragment info (original_uid, position, is_left)
+            # Get fragment info (original_uid, position, is_left, cutter_uid)
             fragment_info = self.nesting_graph.fragments.get(node.uid)
             if fragment_info:
-                orig_uid, _, is_left = fragment_info
+                orig_uid, pos, is_left, cutter_uid = fragment_info
                 half_type = "L" if is_left else "R"
-                cut_half = f"Cut: {half_type}\\n"
+                cut_half = f"Cut: {half_type}, by {cutter_uid}"
                 fill_color = "lightpink"  # Cut fragments shown in pink
 
         # Create node label with position information
@@ -753,7 +750,7 @@ class SequenceTree:
                          str(start_pos_1based), "\\l",
                          str(end_pos_1based), "\\l",
                          "Length: ", str(node.length), "\\n",
-                         cut_half])
+                         cut_half, "\\n"])
 
         # Add the node to the nodes list
         nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
@@ -806,13 +803,17 @@ class DonorNestingGraph:
         # 记录哪个donor被哪些donor切割，产生了哪些片段对
         self.cut_by = {}
 
-        # 片段关系：fragment_uid -> (original_uid, position, is_left)
-        # 记录每个片段来自哪个原始donor，位于哪个位置，是左半部分还是右半部分
+        # 片段关系：fragment_uid -> (original_uid, position, is_left, cutter_uid)
+        # 记录每个片段来自哪个原始donor，位于哪个位置，是左半部分还是右半部分，以及由哪个donor切割产生
         self.fragments = {}
 
         # 返回父片段映射：left_uid/right_uid -> original_uid
         # 记录左/右片段对应的原始donor
         self.fragment_to_original = {}
+
+        # 片段切割者映射: fragment_uid -> cutter_uid
+        # 记录每个片段是由哪个切割者产生的
+        self.fragment_to_cutter = {}
 
     def __str__(self) -> str:
         """
@@ -821,15 +822,12 @@ class DonorNestingGraph:
         Returns:
             str: 格式化的图信息字符串
         """
-        lines = []
-
-        # 标题
-        lines.append("=" * 32)
-        lines.append("DonorNestingGraph 信息")
-        lines.append("=" * 32)
+        lines = ["=" * 32,
+                 "DonorNestingGraph 信息",
+                 "=" * 32,
+                 f"\n节点数量: {len(self.nodes)}"]
 
         # 节点信息
-        lines.append(f"\n节点数量: {len(self.nodes)}")
         for uid, info in self.nodes.items():
             seq = info.get('sequence', '')
             seq_display = seq if len(seq) <= 20 else f"{seq[:10]}...{seq[-10:]}"
@@ -859,14 +857,19 @@ class DonorNestingGraph:
         # 片段关系
         lines.append(f"\n片段关系数量: {len(self.fragments)}")
         for frag_uid, frag_info in self.fragments.items():
-            orig_uid, pos, is_left = frag_info
+            orig_uid, pos, is_left, cutter_uid = frag_info
             side = "左" if is_left else "右"
-            lines.append(f"  片段 {frag_uid} 来自 {orig_uid} 的{side}侧, 位置={pos}")
+            lines.append(f"  片段 {frag_uid} 来自 {orig_uid} 的{side}侧, 位置={pos}, 切割者={cutter_uid}")
 
         # 片段-原始映射
         lines.append(f"\n片段-原始映射数量: {len(self.fragment_to_original)}")
         for frag_uid, orig_uid in self.fragment_to_original.items():
             lines.append(f"  片段 {frag_uid} -> 原始 {orig_uid}")
+
+        # 片段-切割者映射
+        lines.append(f"\n片段-切割者映射数量: {len(self.fragment_to_cutter)}")
+        for frag_uid, cutter_uid in self.fragment_to_cutter.items():
+            lines.append(f"  片段 {frag_uid} -> 切割者 {cutter_uid}")
 
         return "\n".join(lines)
 
@@ -914,12 +917,17 @@ class DonorNestingGraph:
 
         # 记录片段关系
         cut_position = self.nodes[cutter_uid]['position']
-        self.fragments[left_uid] = (cut_uid, cut_position, True)  # True表示左片段
-        self.fragments[right_uid] = (cut_uid, cut_position, False)  # False表示右片段
+        # 添加切割者信息到片段数据中
+        self.fragments[left_uid] = (cut_uid, cut_position, True, cutter_uid)  # True表示左片段
+        self.fragments[right_uid] = (cut_uid, cut_position, False, cutter_uid)  # False表示右片段
 
         # 添加返回父片段的映射
         self.fragment_to_original[left_uid] = cut_uid
         self.fragment_to_original[right_uid] = cut_uid
+        
+        # 添加片段对应的切割者映射
+        self.fragment_to_cutter[left_uid] = cutter_uid
+        self.fragment_to_cutter[right_uid] = cutter_uid
 
         return self
 
@@ -931,9 +939,18 @@ class DonorNestingGraph:
         """获取片段对应的原始donor UID"""
         return self.fragment_to_original.get(uid, uid)
 
+    def get_fragment_cutter(self, uid: int) -> int:
+        """获取产生片段的切割者UID"""
+        return self.fragment_to_cutter.get(uid)
+
     def get_all_fragments(self, original_uid: int) -> list:
         """获取原始donor的所有片段"""
-        return [uid for uid, (orig, _, _) in self.fragments.items() if orig == original_uid]
+        return [uid for uid, (orig, _, _, _) in self.fragments.items() if orig == original_uid]
+    
+    def get_fragments_by_cutter(self, original_uid: int, cutter_uid: int) -> list:
+        """获取特定切割者产生的原始donor的片段"""
+        return [uid for uid, (orig, _, _, cutter) in self.fragments.items() 
+                if orig == original_uid and cutter == cutter_uid]
 
     def get_cut_by(self, cut_uid: int) -> list:
         """获取切割了指定donor的所有donor信息"""
@@ -1111,7 +1128,7 @@ class DonorNestingGraph:
 
     def to_graphviz_dot(self) -> str:
         """
-        生成Graphviz DOT格式可视化
+        生成Graphviz DOT格式可视化，改进版本能够区分多次切割的片段
 
         Returns:
             str: Graphviz DOT格式字符串
@@ -1125,28 +1142,27 @@ class DonorNestingGraph:
             node_type = "Donor"
             fragment_info = ""
             if self.is_fragment(uid):
-                orig_uid, pos, is_left = self.fragments[uid]
-                side = "Left" if is_left else "Right"
-                fragment_info = f"\\nFragment of {orig_uid} ({side})"
+                orig_uid, pos, is_left, cutter_uid = self.fragments[uid]
+                
+                # 添加更详细的片段信息
+                fragment_info = f"\\nFragment of {orig_uid}"
                 node_type = "Fragment"
 
             # 安全获取节点长度
             length = info.get('length', 0)
-            donor_id = info.get('donor_id', '')
+            position = info.get('position', 'N/A')
 
-            # 创建标签，包含donor_id信息
+            # 创建标签，包含更多信息
             label = f"{node_type}\\nUID: {uid}\\nLen: {length}"
-            if donor_id:
-                label += f"\\nID: {donor_id}"
+            if position != 'N/A' and not self.is_fragment(uid):
+                label += f"\\nPos: {position}"
             label += fragment_info
 
-            # 设置颜色
             # 默认donor为蓝色，其他为绿色
-            # 切割片段为粉色
             color = "#AAAAFF" if node_type == "Donor" else "#AAFFAA"
 
-            # 检查是否为切割片段
-            if fragment_info:
+            # 切割片段为粉色
+            if self.is_fragment(uid):
                 color = "#FFAAAA"  # 切割片段为粉色
 
             lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
@@ -1154,9 +1170,12 @@ class DonorNestingGraph:
         # 添加切割关系边
         for cutter_uid, cut_list in self.cuts.items():
             for cut_uid, left_uid, right_uid in cut_list:
+                # 添加切割者到被切割者的边
                 lines.append(f'  node_{cutter_uid} -> node_{cut_uid} [label="cuts", color="red", penwidth=2.0];')
-                lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="left_frag", style="dashed", color="blue"];')
-                lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="right_frag", style="dashed", color="blue"];')
+                
+                # 添加被切割者到左右片段的边，添加切割者信息
+                lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="L\\nby {cutter_uid}", style="dashed", color="blue"];')
+                lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="R\\nby {cutter_uid}", style="dashed", color="blue"];')
 
         lines.append("}")
         return '\n'.join(lines)
