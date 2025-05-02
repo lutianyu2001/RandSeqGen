@@ -383,7 +383,7 @@ class SeqGenerator:
         # Generate visualization if requested
         if self.flag_visual:
             # Generate tree visualization
-            graphviz_str = seq_tree.to_graphviz_dot(node_id_prefix=seq_record.id)
+            graphviz_str = seq_tree.to_graphviz_dot()
             tree_visual_dir_path = os.path.join(self.output_dir_path, VISUAL_DIR_NAME)
             os.makedirs(tree_visual_dir_path, exist_ok=True)
             with open(os.path.join(tree_visual_dir_path, f"{seq_record.id}_tree_visual.dot"), "w") as f:

@@ -173,6 +173,427 @@ class SequenceNode:
         """Get balance factor of right child"""
         return self.right.get_balance_factor() if self.right else 0
 
+class DonorNestingGraph:
+    """
+    表示donor序列和切割关系的图数据结构。
+    用于高效追踪和重建被切割的donor序列。
+    """
+    def __init__(self):
+        # 节点信息：UID -> {sequence, length, donor_id, positions}
+        self.nodes = {}
+
+        # 切割关系：cutter_uid -> [(cut_uid, left_uid, right_uid), ...]
+        # 记录哪个donor切割了哪个donor，产生了哪两个新片段
+        self.cuts = {}
+
+        # 反向切割关系：cut_uid -> [(cutter_uid, left_uid, right_uid), ...]
+        # 记录哪个donor被哪些donor切割，产生了哪些片段对
+        self.cut_by = {}
+
+        # 片段关系：fragment_uid -> (original_uid, position, is_left, cutter_uid)
+        # 记录每个片段来自哪个原始donor，位于哪个位置，是左半部分还是右半部分，以及由哪个donor切割产生
+        self.fragments = {}
+
+        # 返回父片段映射：left_uid/right_uid -> original_uid
+        # 记录左/右片段对应的原始donor
+        self.fragment_to_original = {}
+
+        # 片段切割者映射: fragment_uid -> cutter_uid
+        # 记录每个片段是由哪个切割者产生的
+        self.fragment_to_cutter = {}
+
+    def __str__(self) -> str:
+        """
+        打印图的所有属性信息，用于调试
+
+        Returns:
+            str: 格式化的图信息字符串
+        """
+        lines = ["=" * 32,
+                 "DonorNestingGraph 信息",
+                 "=" * 32,
+                 f"\n节点数量: {len(self.nodes)}"]
+
+        # 节点信息
+        for uid, info in self.nodes.items():
+            seq = info.get('sequence', '')
+            seq_display = seq if len(seq) <= 20 else f"{seq[:10]}...{seq[-10:]}"
+            lines.append(f"  UID {uid}: 长度={info.get('length', 0)}, "
+                         f"donor_id={info.get('donor_id', 'None')}, "
+                         f"位置={info.get('position', 'None')}, "
+                         f"序列={seq_display}")
+
+        # 切割关系
+        cut_count = sum(len(cuts) for cuts in self.cuts.values())
+        lines.append(f"\n切割关系数量: {cut_count}")
+        for cutter, cut_list in self.cuts.items():
+            if cut_list:
+                for cut_info in cut_list:
+                    cut_uid, left_uid, right_uid = cut_info
+                    lines.append(f"  切割者 {cutter} 切割了 {cut_uid} 产生片段: 左={left_uid}, 右={right_uid}")
+
+        # 反向切割关系
+        cut_by_count = sum(len(cuts) for cuts in self.cut_by.values())
+        lines.append(f"\n反向切割关系数量: {cut_by_count}")
+        for cut, cutter_list in self.cut_by.items():
+            if cutter_list:
+                for cut_info in cutter_list:
+                    cutter_uid, left_uid, right_uid = cut_info
+                    lines.append(f"  被切割者 {cut} 被 {cutter_uid} 切割产生片段: 左={left_uid}, 右={right_uid}")
+
+        # 片段关系
+        lines.append(f"\n片段关系数量: {len(self.fragments)}")
+        for frag_uid, frag_info in self.fragments.items():
+            orig_uid, pos, is_left, cutter_uid = frag_info
+            side = "左" if is_left else "右"
+            lines.append(f"  片段 {frag_uid} 来自 {orig_uid} 的{side}侧, 位置={pos}, 切割者={cutter_uid}")
+
+        # 片段-原始映射
+        lines.append(f"\n片段-原始映射数量: {len(self.fragment_to_original)}")
+        for frag_uid, orig_uid in self.fragment_to_original.items():
+            lines.append(f"  片段 {frag_uid} -> 原始 {orig_uid}")
+
+        # 片段-切割者映射
+        lines.append(f"\n片段-切割者映射数量: {len(self.fragment_to_cutter)}")
+        for frag_uid, cutter_uid in self.fragment_to_cutter.items():
+            lines.append(f"  片段 {frag_uid} -> 切割者 {cutter_uid}")
+
+        return "\n".join(lines)
+
+    def add_node(self, uid: int, sequence: str, donor_id: str = None, position: int = None):
+        """
+        添加一个donor节点到图中
+
+        Args:
+            uid: 节点唯一标识符
+            sequence: 节点包含的序列
+            donor_id: donor序列标识符
+            position: 插入位置
+        """
+        self.nodes[uid] = {
+            'sequence': sequence,
+            'length': len(sequence),
+            'donor_id': donor_id,
+            'position': position
+        }
+        return self
+
+    def add_cut_relation(self, cutter_uid: int, cut_uid: int, left_uid: int, right_uid: int):
+        """
+        添加切割关系
+
+        Args:
+            cutter_uid: 切割者donor的UID
+            cut_uid: 被切割donor的UID
+            left_uid: 切割后左片段的UID
+            right_uid: 切割后右片段的UID
+        """
+        # 确保节点存在
+        if not all(uid in self.nodes for uid in [cutter_uid, cut_uid, left_uid, right_uid]):
+            return self
+
+        # 添加切割关系
+        if cutter_uid not in self.cuts:
+            self.cuts[cutter_uid] = []
+        self.cuts[cutter_uid].append((cut_uid, left_uid, right_uid))
+
+        # 添加反向切割关系
+        if cut_uid not in self.cut_by:
+            self.cut_by[cut_uid] = []
+        self.cut_by[cut_uid].append((cutter_uid, left_uid, right_uid))
+
+        # 记录片段关系
+        cut_position = self.nodes[cutter_uid]['position']
+        # 添加切割者信息到片段数据中
+        self.fragments[left_uid] = (cut_uid, cut_position, True, cutter_uid)  # True表示左片段
+        self.fragments[right_uid] = (cut_uid, cut_position, False, cutter_uid)  # False表示右片段
+
+        # 添加返回父片段的映射
+        self.fragment_to_original[left_uid] = cut_uid
+        self.fragment_to_original[right_uid] = cut_uid
+        
+        # 添加片段对应的切割者映射
+        self.fragment_to_cutter[left_uid] = cutter_uid
+        self.fragment_to_cutter[right_uid] = cutter_uid
+
+        return self
+
+    def is_fragment(self, uid: int) -> bool:
+        """判断指定UID的节点是否为片段"""
+        return uid in self.fragments
+
+    def get_original_donor(self, uid: int) -> int:
+        """获取片段对应的原始donor UID"""
+        return self.fragment_to_original.get(uid, uid)
+
+    def get_fragment_cutter(self, uid: int) -> int:
+        """获取产生片段的切割者UID"""
+        return self.fragment_to_cutter.get(uid)
+
+    def get_all_fragments(self, original_uid: int) -> list:
+        """获取原始donor的所有片段"""
+        return [uid for uid, (orig, _, _, _) in self.fragments.items() if orig == original_uid]
+    
+    def get_fragments_by_cutter(self, original_uid: int, cutter_uid: int) -> list:
+        """获取特定切割者产生的原始donor的片段"""
+        return [uid for uid, (orig, _, _, cutter) in self.fragments.items() 
+                if orig == original_uid and cutter == cutter_uid]
+
+    def get_cut_by(self, cut_uid: int) -> list:
+        """获取切割了指定donor的所有donor信息"""
+        return self.cut_by.get(cut_uid, [])
+
+    def get_cuts(self, cutter_uid: int) -> list:
+        """获取被指定donor切割的所有donor信息"""
+        return self.cuts.get(cutter_uid, [])
+
+    def reconstruct_donors(self, seq_id: str) -> tuple:
+        """
+        改进的donor重建算法，处理多重切割情况。使用迭代方法代替递归，以更好地处理循环依赖。
+
+        Args:
+            seq_id: 序列标识符，用于构建输出记录ID
+
+        Returns:
+            tuple: (重建的donor记录列表, 排除的UID集合)
+        """
+        reconstructed = []
+        excluded = set()
+
+        # 收集所有切割关系
+        cut_relations = {}  # donor_uid -> [(cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq)]
+
+        # 预处理所有切割关系
+        for donor_uid, cut_info_list in self.cut_by.items():
+            cut_relations[donor_uid] = []
+            for cutter_uid, left_uid, right_uid in cut_info_list:
+                # 验证节点存在
+                if not all(uid in self.nodes for uid in [donor_uid, cutter_uid, left_uid, right_uid]):
+                    continue
+
+                try:
+                    left_seq = self.nodes[left_uid]['sequence']
+                    right_seq = self.nodes[right_uid]['sequence']
+                    cutter_seq = self.nodes[cutter_uid]['sequence']
+                    cut_relations[donor_uid].append((cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq))
+                except KeyError:
+                    continue
+
+        # 待处理donor队列
+        to_process = list(cut_relations.keys())
+
+        # 优先处理被切割次数多的donor
+        to_process.sort(key=lambda uid: len(cut_relations.get(uid, [])), reverse=True)
+
+        while to_process:
+            # 获取下一个待处理的donor
+            donor_uid = to_process.pop(0)
+
+            # 如果已处理过，跳过
+            if donor_uid in excluded:
+                continue
+
+            # 获取有效的切割关系
+            relations = cut_relations.get(donor_uid, [])
+            if not relations:
+                continue
+
+            # 筛选出cutter尚未被处理的切割关系
+            valid_relations = [r for r in relations if r[0] not in excluded]
+
+            # 如果没有有效切割关系，视为处理过
+            if not valid_relations:
+                excluded.add(donor_uid)
+                continue
+
+            # 判断是否存在多重切割
+            is_multiple_cuts = len(valid_relations) > 1
+
+            # 处理每个有效切割关系，生成完整重建
+            for relation in valid_relations:
+                cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = relation
+
+                # 创建完整重建
+                full_seq = left_seq + cutter_seq + right_seq
+                full_id = f"{seq_id}_reconstructed_{donor_uid}_{cutter_uid}"
+                full_rec = create_sequence_record(full_seq, full_id)
+                full_rec.annotations["reconstruction_type"] = "full"
+                full_rec.annotations["original_uid"] = donor_uid
+                full_rec.annotations["cutter_uid"] = cutter_uid
+                full_rec.annotations["left_uid"] = left_uid
+                full_rec.annotations["right_uid"] = right_uid
+
+                # 将完整重建添加到结果列表
+                reconstructed.append(full_rec)
+
+            # 使用第一个切割关系创建清洁重建
+            first_relation = valid_relations[0]
+            cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = first_relation
+
+            clean_seq = left_seq + right_seq
+            clean_id = f"{seq_id}_clean_reconstructed_{donor_uid}"
+            clean_rec = create_sequence_record(clean_seq, clean_id)
+            clean_rec.annotations["reconstruction_type"] = "clean"
+            clean_rec.annotations["original_uid"] = donor_uid
+            clean_rec.annotations["left_uid"] = left_uid
+            clean_rec.annotations["right_uid"] = right_uid
+
+            # 多重切割标记
+            if is_multiple_cuts:
+                clean_rec.annotations["multiple_cuts"] = True
+                clean_rec.annotations["cut_count"] = len(valid_relations)
+                clean_rec.annotations["all_cutters"] = [r[0] for r in valid_relations]
+
+            # 将清洁重建添加到结果列表
+            reconstructed.append(clean_rec)
+
+            # 标记当前donor为已处理
+            excluded.add(donor_uid)
+
+            # 如果还存在循环依赖，需要特殊处理
+            # 先找出待处理列表中互相切割的donor对
+            cyclic_pairs = []
+            for i, uid1 in enumerate(to_process):
+                for uid2 in to_process[i+1:]:
+                    # 检查uid1是否切割uid2
+                    cuts_forward = any(r[0] == uid1 for r in cut_relations.get(uid2, []))
+                    # 检查uid2是否切割uid1
+                    cuts_backward = any(r[0] == uid2 for r in cut_relations.get(uid1, []))
+
+                    if cuts_forward and cuts_backward:
+                        cyclic_pairs.append((uid1, uid2))
+
+            # 对每个循环依赖对，强制处理其切割关系
+            for uid1, uid2 in cyclic_pairs:
+                # 如果已处理过，跳过
+                if uid1 in excluded or uid2 in excluded:
+                    continue
+
+                # 处理 uid1 切割 uid2
+                for relation in cut_relations.get(uid2, []):
+                    if relation[0] != uid1:
+                        continue
+
+                    cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = relation
+
+                    # 创建完整重建 (uid1切割uid2)
+                    full_seq = left_seq + cutter_seq + right_seq
+                    full_id = f"{seq_id}_reconstructed_{uid2}_{uid1}_CYCLIC"
+                    full_rec = create_sequence_record(full_seq, full_id)
+                    full_rec.annotations["reconstruction_type"] = "full"
+                    full_rec.annotations["original_uid"] = uid2
+                    full_rec.annotations["cutter_uid"] = uid1
+                    full_rec.annotations["left_uid"] = left_uid
+                    full_rec.annotations["right_uid"] = right_uid
+                    full_rec.annotations["cyclic"] = True
+
+                    # 将完整重建添加到结果列表
+                    reconstructed.append(full_rec)
+
+                # 处理 uid2 切割 uid1
+                for relation in cut_relations.get(uid1, []):
+                    if relation[0] != uid2:
+                        continue
+
+                    cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = relation
+
+                    # 创建完整重建 (uid2切割uid1)
+                    full_seq = left_seq + cutter_seq + right_seq
+                    full_id = f"{seq_id}_reconstructed_{uid1}_{uid2}_CYCLIC"
+                    full_rec = create_sequence_record(full_seq, full_id)
+                    full_rec.annotations["reconstruction_type"] = "full"
+                    full_rec.annotations["original_uid"] = uid1
+                    full_rec.annotations["cutter_uid"] = uid2
+                    full_rec.annotations["left_uid"] = left_uid
+                    full_rec.annotations["right_uid"] = right_uid
+                    full_rec.annotations["cyclic"] = True
+
+                    # 将完整重建添加到结果列表
+                    reconstructed.append(full_rec)
+
+        return reconstructed, excluded
+
+    def to_graphviz_dot(self) -> str:
+        """
+        生成Graphviz DOT格式可视化
+
+        Returns:
+            str: Graphviz DOT格式字符串
+        """
+        # 初始化DOT头部
+        dot_header = ["digraph DonorNestingGraph {",
+                      "  bgcolor=\"#FFF\";",
+                      "  node [fontcolor=\"#000\", shape=box, style=filled];",
+                      "  edge [fontcolor=\"#000\", penwidth=2.0];"]
+        
+        # 收集用到的节点
+        used_nodes = set()
+        edge_lines = []
+        
+        # 添加切割关系边，同时收集用到的节点
+        for cutter_uid, cut_list in self.cuts.items():
+            for cut_uid, left_uid, right_uid in cut_list:
+                # 收集用到的节点
+                used_nodes.add(cutter_uid)
+                used_nodes.add(cut_uid)
+                used_nodes.add(left_uid)
+                used_nodes.add(right_uid)
+                
+                # 添加切割者到被切割者的边
+                edge_lines.append(f'  node_{cutter_uid} -> node_{cut_uid} [label="cuts", color="black"];')
+                
+                # 添加被切割者到左右片段的边，添加切割者信息
+                edge_lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="L\\nby {cutter_uid}", style="dashed", color="blue"];')
+                edge_lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="R\\nby {cutter_uid}", style="dashed", color="red"];')
+        
+        # 只为用到的节点生成节点代码
+        node_lines = []
+        for uid in used_nodes:
+            if uid in self.nodes:
+                info = self.nodes[uid]
+                
+                node_type = "Donor"
+                fragment_info = ""
+                
+                # 默认节点为浅绿色
+                color = "lightgreen"
+                
+                # 根据节点类型设置颜色
+                if uid in self.cuts:
+                    # 是切割者，用moccasin
+                    color = "moccasin"
+                    node_type = "Cutter"
+                elif self.is_fragment(uid):
+                    orig_uid, pos, is_left, cutter_uid = self.fragments[uid]
+                    
+                    # 添加片段信息
+                    fragment_info = f"\\nfrom {orig_uid}"
+                    
+                    # 根据片段设置颜色
+                    if is_left:
+                        color = "lightblue"
+                        node_type = "L Fragment"
+                    else:
+                        color = "lightpink"
+                        node_type = "R Fragment"
+
+                # 安全获取节点长度
+                length = info.get('length', 0)
+                position = info.get('position', 'N/A')
+
+                # 创建标签
+                label = f"{node_type}\\nUID: {uid}\\nLen: {length}"
+                if position != 'N/A' and not self.is_fragment(uid):
+                    label += f"\\nPos: {position}"
+                label += fragment_info
+
+                node_lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
+        
+        # 按照先节点后路径的顺序构造最终dot字符串
+        dot_body = node_lines + edge_lines
+        dot_footer = ["}"]
+        
+        return '\n'.join(dot_header + dot_body + dot_footer)
 
 class SequenceTree:
     """
@@ -659,12 +1080,9 @@ class SequenceTree:
         _traverse(self.root, 0)
         return positions
 
-    def to_graphviz_dot(self, node_id_prefix: str = "node") -> str:
+    def to_graphviz_dot(self) -> str:
         """
         Generate a Graphviz DOT representation of the tree structure for visualization.
-
-        Args:
-            node_id_prefix (str): Prefix for node IDs in the graph
 
         Returns:
             str: Graphviz DOT format string
@@ -674,12 +1092,12 @@ class SequenceTree:
 
         # Initialize the DOT string with graph declaration
         dot_str = ["digraph SequenceTree {",
-                   "  bgcolor=\"#FFFFFF\"",
+                   "  bgcolor=\"#FFF\";",
                    "  node [fontcolor=\"#000\", shape=box, style=filled];",
-                   "  edge [fontcolor=\"#000\"];"]
+                   "  edge [fontcolor=\"#000\", penwidth=2.0];"]
 
         # Generate nodes and edges through recursive traversal
-        nodes, edges = self.__build_graphviz_dot_nodes_edges(self.root, node_id_prefix)
+        nodes, edges = SequenceTree._build_graphviz_dot_nodes_edges(self.root, self.nesting_graph)
 
         # Add all nodes and edges to the DOT string
         for node in nodes:
@@ -690,13 +1108,14 @@ class SequenceTree:
         dot_str.append('}')
         return '\n'.join(dot_str)
 
-    def __build_graphviz_dot_nodes_edges(self, node: SequenceNode, node_id_prefix: str, abs_pos: int = 0) -> tuple:
+    @staticmethod
+    def _build_graphviz_dot_nodes_edges(node: SequenceNode, nesting_graph: DonorNestingGraph,
+                                        abs_pos: int = 0) -> tuple:
         """
         Recursively build nodes and edges for Graphviz visualization.
 
         Args:
             node (SequenceNode): Current node
-            node_id_prefix (str): Prefix for node IDs (not used when using uid as node ID)
             abs_pos (int): Current absolute position (0-based)
 
         Returns:
@@ -723,8 +1142,12 @@ class SequenceTree:
         node_id = f"node_{node.uid}"
 
         # Determine node type and color
-        node_type = "Donor" if node.is_donor else "Acceptor"
-        fill_color = "lightblue" if node.is_donor else "lightgreen"
+        if node.is_donor:
+            node_type = "Donor"
+            fill_color = "lightblue"
+        else:
+            node_type = "Acceptor"
+            fill_color = "lightgreen"
 
         # Process fragment and nesting information
         cut_half = ""
@@ -736,11 +1159,11 @@ class SequenceTree:
         # 4. 如果同时满足2和3，则为紫色
 
         # Check if this is a fragment of a cut donor
-        if self.nesting_graph.is_fragment(node.uid):
+        if nesting_graph.is_fragment(node.uid):
             # Get fragment info (original_uid, position, is_left, cutter_uid)
-            fragment_info = self.nesting_graph.fragments.get(node.uid)
+            fragment_info = nesting_graph.fragments.get(node.uid)
             if fragment_info:
-                orig_uid, pos, is_left, cutter_uid = fragment_info
+                _, pos, is_left, cutter_uid = fragment_info
                 half_type = "L" if is_left else "R"
                 cut_half = f"Cut: {half_type}, by {cutter_uid}"
                 fill_color = "lightpink"  # Cut fragments shown in pink
@@ -750,7 +1173,7 @@ class SequenceTree:
                          str(start_pos_1based), "\\l",
                          str(end_pos_1based), "\\l",
                          "Length: ", str(node.length), "\\n",
-                         cut_half, "\\n"])
+                         cut_half])
 
         # Add the node to the nodes list
         nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
@@ -759,450 +1182,24 @@ class SequenceTree:
         if node.left:
             # Left child should start at the same absolute position as its parent
             left_abs_pos = abs_pos
-            left_nodes, left_edges = self.__build_graphviz_dot_nodes_edges(
-                node.left, f"{node_id_prefix}_L", left_abs_pos
-            )
+            left_nodes, left_edges = SequenceTree._build_graphviz_dot_nodes_edges(node.left, nesting_graph, left_abs_pos)
             nodes.extend(left_nodes)
             edges.extend(left_edges)
 
             # Add edge from this node to left child using uid
             left_id = f"node_{node.left.uid}"
-            edges.append(f'{node_id} -> {left_id} [label="L"];')
+            edges.append(f'{node_id} -> {left_id} [label="L", color="blue"];')
 
         # Process right child if exists
         if node.right:
             # Right child starts at the end position of the current node
             right_abs_pos = abs_pos + left_length + node.length
-            right_nodes, right_edges = self.__build_graphviz_dot_nodes_edges(
-                node.right, f"{node_id_prefix}_R", right_abs_pos
-            )
+            right_nodes, right_edges = SequenceTree._build_graphviz_dot_nodes_edges(node.right, nesting_graph, right_abs_pos)
             nodes.extend(right_nodes)
             edges.extend(right_edges)
 
             # Add edge from this node to right child using uid
             right_id = f"node_{node.right.uid}"
-            edges.append(f'{node_id} -> {right_id} [label="R"];')
+            edges.append(f'{node_id} -> {right_id} [label="R", color="red"];')
 
         return nodes, edges
-
-
-class DonorNestingGraph:
-    """
-    表示donor序列和切割关系的图数据结构。
-    用于高效追踪和重建被切割的donor序列。
-    """
-    def __init__(self):
-        # 节点信息：UID -> {sequence, length, donor_id, positions}
-        self.nodes = {}
-
-        # 切割关系：cutter_uid -> [(cut_uid, left_uid, right_uid), ...]
-        # 记录哪个donor切割了哪个donor，产生了哪两个新片段
-        self.cuts = {}
-
-        # 反向切割关系：cut_uid -> [(cutter_uid, left_uid, right_uid), ...]
-        # 记录哪个donor被哪些donor切割，产生了哪些片段对
-        self.cut_by = {}
-
-        # 片段关系：fragment_uid -> (original_uid, position, is_left, cutter_uid)
-        # 记录每个片段来自哪个原始donor，位于哪个位置，是左半部分还是右半部分，以及由哪个donor切割产生
-        self.fragments = {}
-
-        # 返回父片段映射：left_uid/right_uid -> original_uid
-        # 记录左/右片段对应的原始donor
-        self.fragment_to_original = {}
-
-        # 片段切割者映射: fragment_uid -> cutter_uid
-        # 记录每个片段是由哪个切割者产生的
-        self.fragment_to_cutter = {}
-
-    def __str__(self) -> str:
-        """
-        打印图的所有属性信息，用于调试
-
-        Returns:
-            str: 格式化的图信息字符串
-        """
-        lines = ["=" * 32,
-                 "DonorNestingGraph 信息",
-                 "=" * 32,
-                 f"\n节点数量: {len(self.nodes)}"]
-
-        # 节点信息
-        for uid, info in self.nodes.items():
-            seq = info.get('sequence', '')
-            seq_display = seq if len(seq) <= 20 else f"{seq[:10]}...{seq[-10:]}"
-            lines.append(f"  UID {uid}: 长度={info.get('length', 0)}, "
-                         f"donor_id={info.get('donor_id', 'None')}, "
-                         f"位置={info.get('position', 'None')}, "
-                         f"序列={seq_display}")
-
-        # 切割关系
-        cut_count = sum(len(cuts) for cuts in self.cuts.values())
-        lines.append(f"\n切割关系数量: {cut_count}")
-        for cutter, cut_list in self.cuts.items():
-            if cut_list:
-                for cut_info in cut_list:
-                    cut_uid, left_uid, right_uid = cut_info
-                    lines.append(f"  切割者 {cutter} 切割了 {cut_uid} 产生片段: 左={left_uid}, 右={right_uid}")
-
-        # 反向切割关系
-        cut_by_count = sum(len(cuts) for cuts in self.cut_by.values())
-        lines.append(f"\n反向切割关系数量: {cut_by_count}")
-        for cut, cutter_list in self.cut_by.items():
-            if cutter_list:
-                for cut_info in cutter_list:
-                    cutter_uid, left_uid, right_uid = cut_info
-                    lines.append(f"  被切割者 {cut} 被 {cutter_uid} 切割产生片段: 左={left_uid}, 右={right_uid}")
-
-        # 片段关系
-        lines.append(f"\n片段关系数量: {len(self.fragments)}")
-        for frag_uid, frag_info in self.fragments.items():
-            orig_uid, pos, is_left, cutter_uid = frag_info
-            side = "左" if is_left else "右"
-            lines.append(f"  片段 {frag_uid} 来自 {orig_uid} 的{side}侧, 位置={pos}, 切割者={cutter_uid}")
-
-        # 片段-原始映射
-        lines.append(f"\n片段-原始映射数量: {len(self.fragment_to_original)}")
-        for frag_uid, orig_uid in self.fragment_to_original.items():
-            lines.append(f"  片段 {frag_uid} -> 原始 {orig_uid}")
-
-        # 片段-切割者映射
-        lines.append(f"\n片段-切割者映射数量: {len(self.fragment_to_cutter)}")
-        for frag_uid, cutter_uid in self.fragment_to_cutter.items():
-            lines.append(f"  片段 {frag_uid} -> 切割者 {cutter_uid}")
-
-        return "\n".join(lines)
-
-    def add_node(self, uid: int, sequence: str, donor_id: str = None, position: int = None):
-        """
-        添加一个donor节点到图中
-
-        Args:
-            uid: 节点唯一标识符
-            sequence: 节点包含的序列
-            donor_id: donor序列标识符
-            position: 插入位置
-        """
-        self.nodes[uid] = {
-            'sequence': sequence,
-            'length': len(sequence),
-            'donor_id': donor_id,
-            'position': position
-        }
-        return self
-
-    def add_cut_relation(self, cutter_uid: int, cut_uid: int, left_uid: int, right_uid: int):
-        """
-        添加切割关系
-
-        Args:
-            cutter_uid: 切割者donor的UID
-            cut_uid: 被切割donor的UID
-            left_uid: 切割后左片段的UID
-            right_uid: 切割后右片段的UID
-        """
-        # 确保节点存在
-        if not all(uid in self.nodes for uid in [cutter_uid, cut_uid, left_uid, right_uid]):
-            return self
-
-        # 添加切割关系
-        if cutter_uid not in self.cuts:
-            self.cuts[cutter_uid] = []
-        self.cuts[cutter_uid].append((cut_uid, left_uid, right_uid))
-
-        # 添加反向切割关系
-        if cut_uid not in self.cut_by:
-            self.cut_by[cut_uid] = []
-        self.cut_by[cut_uid].append((cutter_uid, left_uid, right_uid))
-
-        # 记录片段关系
-        cut_position = self.nodes[cutter_uid]['position']
-        # 添加切割者信息到片段数据中
-        self.fragments[left_uid] = (cut_uid, cut_position, True, cutter_uid)  # True表示左片段
-        self.fragments[right_uid] = (cut_uid, cut_position, False, cutter_uid)  # False表示右片段
-
-        # 添加返回父片段的映射
-        self.fragment_to_original[left_uid] = cut_uid
-        self.fragment_to_original[right_uid] = cut_uid
-        
-        # 添加片段对应的切割者映射
-        self.fragment_to_cutter[left_uid] = cutter_uid
-        self.fragment_to_cutter[right_uid] = cutter_uid
-
-        return self
-
-    def is_fragment(self, uid: int) -> bool:
-        """判断指定UID的节点是否为片段"""
-        return uid in self.fragments
-
-    def get_original_donor(self, uid: int) -> int:
-        """获取片段对应的原始donor UID"""
-        return self.fragment_to_original.get(uid, uid)
-
-    def get_fragment_cutter(self, uid: int) -> int:
-        """获取产生片段的切割者UID"""
-        return self.fragment_to_cutter.get(uid)
-
-    def get_all_fragments(self, original_uid: int) -> list:
-        """获取原始donor的所有片段"""
-        return [uid for uid, (orig, _, _, _) in self.fragments.items() if orig == original_uid]
-    
-    def get_fragments_by_cutter(self, original_uid: int, cutter_uid: int) -> list:
-        """获取特定切割者产生的原始donor的片段"""
-        return [uid for uid, (orig, _, _, cutter) in self.fragments.items() 
-                if orig == original_uid and cutter == cutter_uid]
-
-    def get_cut_by(self, cut_uid: int) -> list:
-        """获取切割了指定donor的所有donor信息"""
-        return self.cut_by.get(cut_uid, [])
-
-    def get_cuts(self, cutter_uid: int) -> list:
-        """获取被指定donor切割的所有donor信息"""
-        return self.cuts.get(cutter_uid, [])
-
-    def reconstruct_donors(self, seq_id: str) -> tuple:
-        """
-        改进的donor重建算法，处理多重切割情况。使用迭代方法代替递归，以更好地处理循环依赖。
-
-        Args:
-            seq_id: 序列标识符，用于构建输出记录ID
-
-        Returns:
-            tuple: (重建的donor记录列表, 排除的UID集合)
-        """
-        reconstructed = []
-        excluded = set()
-
-        # 收集所有切割关系
-        cut_relations = {}  # donor_uid -> [(cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq)]
-
-        # 预处理所有切割关系
-        for donor_uid, cut_info_list in self.cut_by.items():
-            cut_relations[donor_uid] = []
-            for cutter_uid, left_uid, right_uid in cut_info_list:
-                # 验证节点存在
-                if not all(uid in self.nodes for uid in [donor_uid, cutter_uid, left_uid, right_uid]):
-                    continue
-
-                try:
-                    left_seq = self.nodes[left_uid]['sequence']
-                    right_seq = self.nodes[right_uid]['sequence']
-                    cutter_seq = self.nodes[cutter_uid]['sequence']
-                    cut_relations[donor_uid].append((cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq))
-                except KeyError:
-                    continue
-
-        # 待处理donor队列
-        to_process = list(cut_relations.keys())
-
-        # 优先处理被切割次数多的donor
-        to_process.sort(key=lambda uid: len(cut_relations.get(uid, [])), reverse=True)
-
-        while to_process:
-            # 获取下一个待处理的donor
-            donor_uid = to_process.pop(0)
-
-            # 如果已处理过，跳过
-            if donor_uid in excluded:
-                continue
-
-            # 获取有效的切割关系
-            relations = cut_relations.get(donor_uid, [])
-            if not relations:
-                continue
-
-            # 筛选出cutter尚未被处理的切割关系
-            valid_relations = [r for r in relations if r[0] not in excluded]
-
-            # 如果没有有效切割关系，视为处理过
-            if not valid_relations:
-                excluded.add(donor_uid)
-                continue
-
-            # 判断是否存在多重切割
-            is_multiple_cuts = len(valid_relations) > 1
-
-            # 处理每个有效切割关系，生成完整重建
-            for relation in valid_relations:
-                cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = relation
-
-                # 创建完整重建
-                full_seq = left_seq + cutter_seq + right_seq
-                full_id = f"{seq_id}_reconstructed_{donor_uid}_{cutter_uid}"
-                full_rec = create_sequence_record(full_seq, full_id)
-                full_rec.annotations["reconstruction_type"] = "full"
-                full_rec.annotations["original_uid"] = donor_uid
-                full_rec.annotations["cutter_uid"] = cutter_uid
-                full_rec.annotations["left_uid"] = left_uid
-                full_rec.annotations["right_uid"] = right_uid
-
-                # 将完整重建添加到结果列表
-                reconstructed.append(full_rec)
-
-            # 使用第一个切割关系创建清洁重建
-            first_relation = valid_relations[0]
-            cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = first_relation
-
-            clean_seq = left_seq + right_seq
-            clean_id = f"{seq_id}_clean_reconstructed_{donor_uid}"
-            clean_rec = create_sequence_record(clean_seq, clean_id)
-            clean_rec.annotations["reconstruction_type"] = "clean"
-            clean_rec.annotations["original_uid"] = donor_uid
-            clean_rec.annotations["left_uid"] = left_uid
-            clean_rec.annotations["right_uid"] = right_uid
-
-            # 多重切割标记
-            if is_multiple_cuts:
-                clean_rec.annotations["multiple_cuts"] = True
-                clean_rec.annotations["cut_count"] = len(valid_relations)
-                clean_rec.annotations["all_cutters"] = [r[0] for r in valid_relations]
-
-            # 将清洁重建添加到结果列表
-            reconstructed.append(clean_rec)
-
-            # 标记当前donor为已处理
-            excluded.add(donor_uid)
-
-            # 如果还存在循环依赖，需要特殊处理
-            # 先找出待处理列表中互相切割的donor对
-            cyclic_pairs = []
-            for i, uid1 in enumerate(to_process):
-                for uid2 in to_process[i+1:]:
-                    # 检查uid1是否切割uid2
-                    cuts_forward = any(r[0] == uid1 for r in cut_relations.get(uid2, []))
-                    # 检查uid2是否切割uid1
-                    cuts_backward = any(r[0] == uid2 for r in cut_relations.get(uid1, []))
-
-                    if cuts_forward and cuts_backward:
-                        cyclic_pairs.append((uid1, uid2))
-
-            # 对每个循环依赖对，强制处理其切割关系
-            for uid1, uid2 in cyclic_pairs:
-                # 如果已处理过，跳过
-                if uid1 in excluded or uid2 in excluded:
-                    continue
-
-                # 处理 uid1 切割 uid2
-                for relation in cut_relations.get(uid2, []):
-                    if relation[0] != uid1:
-                        continue
-
-                    cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = relation
-
-                    # 创建完整重建 (uid1切割uid2)
-                    full_seq = left_seq + cutter_seq + right_seq
-                    full_id = f"{seq_id}_reconstructed_{uid2}_{uid1}_CYCLIC"
-                    full_rec = create_sequence_record(full_seq, full_id)
-                    full_rec.annotations["reconstruction_type"] = "full"
-                    full_rec.annotations["original_uid"] = uid2
-                    full_rec.annotations["cutter_uid"] = uid1
-                    full_rec.annotations["left_uid"] = left_uid
-                    full_rec.annotations["right_uid"] = right_uid
-                    full_rec.annotations["cyclic"] = True
-
-                    # 将完整重建添加到结果列表
-                    reconstructed.append(full_rec)
-
-                # 处理 uid2 切割 uid1
-                for relation in cut_relations.get(uid1, []):
-                    if relation[0] != uid2:
-                        continue
-
-                    cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = relation
-
-                    # 创建完整重建 (uid2切割uid1)
-                    full_seq = left_seq + cutter_seq + right_seq
-                    full_id = f"{seq_id}_reconstructed_{uid1}_{uid2}_CYCLIC"
-                    full_rec = create_sequence_record(full_seq, full_id)
-                    full_rec.annotations["reconstruction_type"] = "full"
-                    full_rec.annotations["original_uid"] = uid1
-                    full_rec.annotations["cutter_uid"] = uid2
-                    full_rec.annotations["left_uid"] = left_uid
-                    full_rec.annotations["right_uid"] = right_uid
-                    full_rec.annotations["cyclic"] = True
-
-                    # 将完整重建添加到结果列表
-                    reconstructed.append(full_rec)
-
-        return reconstructed, excluded
-
-    def to_graphviz_dot(self) -> str:
-        """
-        生成Graphviz DOT格式可视化
-
-        Returns:
-            str: Graphviz DOT格式字符串
-        """
-        # 初始化DOT头部
-        dot_header = ["digraph DonorNestingGraph {",
-                 "  bgcolor=\"#FFFFFF\";",
-                 "  node [shape=box, style=filled, fontsize=10];"]
-        
-        # 收集用到的节点
-        used_nodes = set()
-        edge_lines = []
-        
-        # 添加切割关系边，同时收集用到的节点
-        for cutter_uid, cut_list in self.cuts.items():
-            for cut_uid, left_uid, right_uid in cut_list:
-                # 收集用到的节点
-                used_nodes.add(cutter_uid)
-                used_nodes.add(cut_uid)
-                used_nodes.add(left_uid)
-                used_nodes.add(right_uid)
-                
-                # 添加切割者到被切割者的边
-                edge_lines.append(f'  node_{cutter_uid} -> node_{cut_uid} [label="cuts", color="red", penwidth=2.0];')
-                
-                # 添加被切割者到左右片段的边，添加切割者信息
-                edge_lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="L\\nby {cutter_uid}", style="dashed", color="blue"];')
-                edge_lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="R\\nby {cutter_uid}", style="dashed", color="blue"];')
-        
-        # 只为用到的节点生成节点代码
-        node_lines = []
-        for uid in used_nodes:
-            if uid in self.nodes:
-                info = self.nodes[uid]
-                
-                node_type = "Donor"
-                fragment_info = ""
-                
-                # 默认节点为浅绿色
-                color = "lightgreen"
-                
-                # 根据节点类型设置颜色
-                if uid in self.cuts:
-                    # 是切割者，用moccasin
-                    color = "moccasin"
-                    node_type = "Cutter"
-                elif self.is_fragment(uid):
-                    orig_uid, pos, is_left, cutter_uid = self.fragments[uid]
-                    
-                    # 添加片段信息
-                    fragment_info = f"\\nfrom {orig_uid}"
-                    
-                    # 根据片段设置颜色
-                    if is_left:
-                        color = "lightblue"
-                        node_type = "L Fragment"
-                    else:
-                        color = "lightpink"
-                        node_type = "R Fragment"
-
-                # 安全获取节点长度
-                length = info.get('length', 0)
-                position = info.get('position', 'N/A')
-
-                # 创建标签
-                label = f"{node_type}\\nUID: {uid}\\nLen: {length}"
-                if position != 'N/A' and not self.is_fragment(uid):
-                    label += f"\\nPos: {position}"
-                label += fragment_info
-
-                node_lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
-        
-        # 按照先节点后路径的顺序构造最终dot字符串
-        dot_body = node_lines + edge_lines
-        dot_footer = ["}"]
-        
-        return '\n'.join(dot_header + dot_body + dot_footer)
