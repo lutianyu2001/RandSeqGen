@@ -694,137 +694,6 @@ class SequenceTree:
         else:
             self.root = self._insert_recursive(self.root, zero_based_position, donor_seq, donor_id, tsd_length, debug)
 
-    def _insert_recursive(self, node: SequenceNode, abs_position: int, donor_seq: str,
-                          donor_id: str = None, tsd_length: int = 0, debug: bool = False) -> SequenceNode:
-        """
-        Recursively insert a donor sequence at the absolute position in the tree.
-
-        Args:
-            node (SequenceNode): Current node
-            abs_position (int): Absolute position in the tree to insert at (0-based)
-            donor_seq (str): Donor sequence to insert
-            donor_id (str): Identifier for the donor sequence
-            tsd_length (int): Length of Target Site Duplication (TSD) to generate
-
-        Returns:
-            SequenceNode: New node after insertion
-        """
-        # Skip insertion if donor sequence is empty
-        if not donor_seq:
-            return node
-
-        # 创建donor节点UID
-        donor_node_uid = self._get_next_uid()
-        # 添加到嵌套关系图
-        self.nesting_graph.add_node(donor_node_uid, donor_seq, donor_id, abs_position)
-
-        # Calculate positions in tree
-        node_start = node.left.total_length if node.left else 0
-        node_end = node_start + node.length
-
-        # Case 1: Position is in the current node's left subtree
-        if abs_position <= node_start:
-            if node.left:
-                node.left = self._insert_recursive(node.left, abs_position, donor_seq, donor_id, tsd_length)
-            else:
-                # Insert as left child - 使用预先创建的UID
-                node.left = self._create_node(donor_seq, True, donor_id, donor_node_uid)
-
-            node.update()
-            return node.balance()
-
-        # Case 2: Position is inside the current node
-        if node_start < abs_position < node_end:
-            # Split this node
-            rel_pos = abs_position - node_start
-            left_data = node.data[:rel_pos]
-            right_data = node.data[rel_pos:]
-
-            # Handle TSD generation
-            if tsd_length > 0:
-                # Extract source TSD sequence from the original sequence
-                source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
-
-                # Generate TSD sequences (potentially with mutations)
-                tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
-
-                # Remove source TSD from right_data as it will be duplicated
-                if len(source_tsd_seq) > 0:
-                    right_data = right_data[len(source_tsd_seq):]
-
-                # Add TSD sequences to the left and right data
-                left_data = left_data + tsd_5
-                right_data = tsd_3 + right_data
-
-            # 保存当前节点的信息
-            old_node_uid = node.uid
-            is_current_donor = node.is_donor
-            current_donor_id = node.donor_id
-
-            # 创建左、右片段节点的UID
-            left_node_uid = self._get_next_uid()
-            right_node_uid = self._get_next_uid()
-
-            # 添加左右片段节点到关系图
-            self.nesting_graph.add_node(left_node_uid, left_data, current_donor_id, node_start)
-            self.nesting_graph.add_node(right_node_uid, right_data, current_donor_id, abs_position + len(donor_seq))
-
-            # 使用预设的UID创建新节点
-            new_left = self._create_node(left_data, is_current_donor, current_donor_id, left_node_uid)
-            if node.left:
-                new_left.left = node.left
-                new_left.update()
-                # Balance left subtree
-                new_left = new_left.balance()
-
-            # 使用预设的UID创建右节点
-            new_right = self._create_node(right_data, is_current_donor, current_donor_id, right_node_uid)
-            if node.right:
-                new_right.right = node.right
-                new_right.update()
-                # Balance right subtree
-                new_right = new_right.balance()
-
-            # 如果当前节点是donor，记录切割关系
-            if is_current_donor:
-                # 添加切割关系到嵌套关系图
-                self.nesting_graph.add_cut_relation(
-                    donor_node_uid,  # 切割者donor的UID
-                    old_node_uid,    # 被切割donor的UID
-                    left_node_uid,   # 切割后左片段的UID
-                    right_node_uid   # 切割后右片段的UID
-                )
-
-            self._release_uid(old_node_uid)
-
-            # 更新节点信息
-            node.data = donor_seq
-            node.length = len(donor_seq)
-            node.is_donor = True
-            node.donor_id = donor_id
-            node.uid = donor_node_uid
-            self.node_dict[donor_node_uid] = node
-
-            # Set new children
-            node.left = new_left
-            node.right = new_right
-            node.update()
-
-            return node.balance()
-
-        # Case 3: Position is in the current node's right subtree
-        if abs_position >= node_end:
-            if node.right:
-                node.right = self._insert_recursive(node.right, abs_position - node_end, donor_seq, donor_id, tsd_length)
-            else:
-                # Insert as right child - 使用预先创建的UID
-                node.right = self._create_node(donor_seq, True, donor_id, donor_node_uid)
-
-            node.update()
-            return node.balance()
-
-        raise RuntimeError("[ERROR] Should not reach here")
-
     def _insert_iterative(self, node: SequenceNode, abs_position: int, donor_seq: str,
                           donor_id: str = None, tsd_length: int = 0, debug: bool = False) -> SequenceNode:
         """
@@ -890,10 +759,9 @@ class SequenceTree:
                     # Remove source TSD from right_data as it will be duplicated
                     if len(source_tsd_seq) > 0:
                         right_data = right_data[len(source_tsd_seq):]
-
-                    # Add TSD sequences to the left and right data
-                    left_data = left_data + tsd_5
-                    right_data = tsd_3 + right_data
+                    
+                    # Add TSD sequences to the donor sequence
+                    donor_seq = tsd_5 + donor_seq + tsd_3
 
                 # 保存当前节点信息
                 old_node_uid = current.uid
@@ -929,8 +797,6 @@ class SequenceTree:
                         left_node_uid,   # 切割后左片段的UID
                         right_node_uid   # 切割后右片段的UID
                     )
-
-                self._release_uid(old_node_uid)
 
                 # 更新节点信息
                 current.data = donor_seq
@@ -985,6 +851,134 @@ class SequenceTree:
             current = parent.balance()
 
         return current
+
+    def _insert_recursive(self, node: SequenceNode, abs_position: int, donor_seq: str,
+                          donor_id: str = None, tsd_length: int = 0, debug: bool = False) -> SequenceNode:
+        """
+        Recursively insert a donor sequence at the absolute position in the tree.
+
+        Args:
+            node (SequenceNode): Current node
+            abs_position (int): Absolute position in the tree to insert at (0-based)
+            donor_seq (str): Donor sequence to insert
+            donor_id (str): Identifier for the donor sequence
+            tsd_length (int): Length of Target Site Duplication (TSD) to generate
+
+        Returns:
+            SequenceNode: New node after insertion
+        """
+        # Skip insertion if donor sequence is empty
+        if not donor_seq:
+            return node
+
+        # 创建donor节点UID
+        donor_node_uid = self._get_next_uid()
+        # 添加到嵌套关系图
+        self.nesting_graph.add_node(donor_node_uid, donor_seq, donor_id, abs_position)
+
+        # Calculate positions in tree
+        node_start = node.left.total_length if node.left else 0
+        node_end = node_start + node.length
+
+        # Case 1: Position is in the current node's left subtree
+        if abs_position <= node_start:
+            if node.left:
+                node.left = self._insert_recursive(node.left, abs_position, donor_seq, donor_id, tsd_length)
+            else:
+                # Insert as left child - 使用预先创建的UID
+                node.left = self._create_node(donor_seq, True, donor_id, donor_node_uid)
+
+            node.update()
+            return node.balance()
+
+        # Case 2: Position is inside the current node
+        if node_start < abs_position < node_end:
+            # Split this node
+            rel_pos = abs_position - node_start
+            left_data = node.data[:rel_pos]
+            right_data = node.data[rel_pos:]
+
+            # Handle TSD generation
+            if tsd_length > 0:
+                # Extract source TSD sequence from the original sequence
+                source_tsd_seq = right_data[:min(tsd_length, len(right_data))]
+
+                # Generate TSD sequences (potentially with mutations)
+                tsd_5, tsd_3 = generate_TSD(source_tsd_seq, tsd_length)
+
+                # Remove source TSD from right_data as it will be duplicated
+                if len(source_tsd_seq) > 0:
+                    right_data = right_data[len(source_tsd_seq):]
+
+                # Add TSD sequences to the donor sequence
+                donor_seq = tsd_5 + donor_seq + tsd_3
+
+            # 保存当前节点的信息
+            old_node_uid = node.uid
+            is_current_donor = node.is_donor
+            current_donor_id = node.donor_id
+
+            # 创建左、右片段节点的UID
+            left_node_uid = self._get_next_uid()
+            right_node_uid = self._get_next_uid()
+
+            # 添加左右片段节点到关系图
+            self.nesting_graph.add_node(left_node_uid, left_data, current_donor_id, node_start)
+            self.nesting_graph.add_node(right_node_uid, right_data, current_donor_id, abs_position + len(donor_seq))
+
+            # 使用预设的UID创建新节点
+            new_left = self._create_node(left_data, is_current_donor, current_donor_id, left_node_uid)
+            if node.left:
+                new_left.left = node.left
+                new_left.update()
+                # Balance left subtree
+                new_left = new_left.balance()
+
+            # 使用预设的UID创建右节点
+            new_right = self._create_node(right_data, is_current_donor, current_donor_id, right_node_uid)
+            if node.right:
+                new_right.right = node.right
+                new_right.update()
+                # Balance right subtree
+                new_right = new_right.balance()
+
+            # 如果当前节点是donor，记录切割关系
+            if is_current_donor:
+                # 添加切割关系到嵌套关系图
+                self.nesting_graph.add_cut_relation(
+                    donor_node_uid,  # 切割者donor的UID
+                    old_node_uid,    # 被切割donor的UID
+                    left_node_uid,   # 切割后左片段的UID
+                    right_node_uid   # 切割后右片段的UID
+                )
+
+            # 更新节点信息
+            node.data = donor_seq
+            node.length = len(donor_seq)
+            node.is_donor = True
+            node.donor_id = donor_id
+            node.uid = donor_node_uid
+            self.node_dict[donor_node_uid] = node
+
+            # Set new children
+            node.left = new_left
+            node.right = new_right
+            node.update()
+
+            return node.balance()
+
+        # Case 3: Position is in the current node's right subtree
+        if abs_position >= node_end:
+            if node.right:
+                node.right = self._insert_recursive(node.right, abs_position - node_end, donor_seq, donor_id, tsd_length)
+            else:
+                # Insert as right child - 使用预先创建的UID
+                node.right = self._create_node(donor_seq, True, donor_id, donor_node_uid)
+
+            node.update()
+            return node.balance()
+
+        raise RuntimeError("[ERROR] Should not reach here")
 
     def donors(self, seq_id: str) -> Tuple[List[SeqRecord], List[SeqRecord]]:
         """
