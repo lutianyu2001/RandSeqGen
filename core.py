@@ -173,37 +173,102 @@ class SequenceNode:
         """Get balance factor of right child"""
         return self.right.get_balance_factor() if self.right else 0
 
-class HierarchicalNestingGraph:
+class DonorNestingGraph:
     """
-    A hierarchical graph representing donor sequence insertions and their nesting relationships.
-    Efficiently tracks and rebuilds nested donor sequences.
+    表示donor序列和切割关系的图数据结构。
+    用于高效追踪和重建被切割的donor序列。
     """
     def __init__(self):
-        """Initialize the hierarchical nesting graph with empty data structures."""
-        # Store basic node information
-        self.nodes = {}  # uid → {sequence, donor_id, position, length}
-        
-        # Store cutting relationships
-        self.cuts = {}  # target_uid → [(position, cutter_uid, left_uid, right_uid, tsd_info)]
-        
-        # Store fragment information
-        self.fragments = {}  # fragment_uid → (original_uid, position, is_left, cutter_uid)
-        
-        # Store reverse index of cutting relationships
-        self.cut_targets = {}  # cutter_uid → [target_uid]
+        # 节点信息：UID -> {sequence, length, donor_id, positions}
+        self.nodes = {}
+
+        # 切割关系：cutter_uid -> [(cut_uid, left_uid, right_uid), ...]
+        # 记录哪个donor切割了哪个donor，产生了哪两个新片段
+        self.cuts = {}
+
+        # 反向切割关系：cut_uid -> [(cutter_uid, left_uid, right_uid), ...]
+        # 记录哪个donor被哪些donor切割，产生了哪些片段对
+        self.cut_by = {}
+
+        # 片段关系：fragment_uid -> (original_uid, position, is_left, cutter_uid)
+        # 记录每个片段来自哪个原始donor，位于哪个位置，是左半部分还是右半部分，以及由哪个donor切割产生
+        self.fragments = {}
+
+        # 返回父片段映射：left_uid/right_uid -> original_uid
+        # 记录左/右片段对应的原始donor
+        self.fragment_to_original = {}
+
+        # 片段切割者映射: fragment_uid -> cutter_uid
+        # 记录每个片段是由哪个切割者产生的
+        self.fragment_to_cutter = {}
+
+    def __str__(self) -> str:
+        """
+        打印图的所有属性信息，用于调试
+
+        Returns:
+            str: 格式化的图信息字符串
+        """
+        lines = ["=" * 32,
+                 "DonorNestingGraph 信息",
+                 "=" * 32,
+                 f"\n节点数量: {len(self.nodes)}"]
+
+        # 节点信息
+        for uid, info in self.nodes.items():
+            seq = info.get('sequence', '')
+            seq_display = seq if len(seq) <= 20 else f"{seq[:10]}...{seq[-10:]}"
+            lines.append(f"  UID {uid}: 长度={info.get('length', 0)}, "
+                         f"donor_id={info.get('donor_id', 'None')}, "
+                         f"位置={info.get('position', 'None')}, "
+                         f"序列={seq_display}")
+
+        # 切割关系
+        cut_count = sum(len(cuts) for cuts in self.cuts.values())
+        lines.append(f"\n切割关系数量: {cut_count}")
+        for cutter, cut_list in self.cuts.items():
+            if cut_list:
+                for cut_info in cut_list:
+                    cut_uid, left_uid, right_uid = cut_info
+                    lines.append(f"  切割者 {cutter} 切割了 {cut_uid} 产生片段: 左={left_uid}, 右={right_uid}")
+
+        # 反向切割关系
+        cut_by_count = sum(len(cuts) for cuts in self.cut_by.values())
+        lines.append(f"\n反向切割关系数量: {cut_by_count}")
+        for cut, cutter_list in self.cut_by.items():
+            if cutter_list:
+                for cut_info in cutter_list:
+                    cutter_uid, left_uid, right_uid = cut_info
+                    lines.append(f"  被切割者 {cut} 被 {cutter_uid} 切割产生片段: 左={left_uid}, 右={right_uid}")
+
+        # 片段关系
+        lines.append(f"\n片段关系数量: {len(self.fragments)}")
+        for frag_uid, frag_info in self.fragments.items():
+            orig_uid, pos, is_left, cutter_uid = frag_info
+            side = "左" if is_left else "右"
+            lines.append(f"  片段 {frag_uid} 来自 {orig_uid} 的{side}侧, 位置={pos}, 切割者={cutter_uid}")
+
+        # 片段-原始映射
+        lines.append(f"\n片段-原始映射数量: {len(self.fragment_to_original)}")
+        for frag_uid, orig_uid in self.fragment_to_original.items():
+            lines.append(f"  片段 {frag_uid} -> 原始 {orig_uid}")
+
+        # 片段-切割者映射
+        lines.append(f"\n片段-切割者映射数量: {len(self.fragment_to_cutter)}")
+        for frag_uid, cutter_uid in self.fragment_to_cutter.items():
+            lines.append(f"  片段 {frag_uid} -> 切割者 {cutter_uid}")
+
+        return "\n".join(lines)
 
     def add_node(self, uid: int, sequence: str, donor_id: str = None, position: int = None):
         """
-        Add a node to the graph.
-        
+        添加一个donor节点到图中
+
         Args:
-            uid: Node unique identifier
-            sequence: Node sequence content
-            donor_id: Donor identifier (optional)
-            position: Insertion position (optional)
-            
-        Returns:
-            self for method chaining
+            uid: 节点唯一标识符
+            sequence: 节点包含的序列
+            donor_id: donor序列标识符
+            position: 插入位置
         """
         self.nodes[uid] = {
             'sequence': sequence,
@@ -212,599 +277,323 @@ class HierarchicalNestingGraph:
             'position': position
         }
         return self
-        
-    def record_cut(self, target_uid: int, position: int, cutter_uid: int, 
-                  left_uid: int, right_uid: int, tsd_info: dict = None):
-        """
-        Record a cutting relationship in the graph.
-        
-        Args:
-            target_uid: The node being cut
-            position: Cut position in the target sequence
-            cutter_uid: The node performing the cut
-            left_uid: Left fragment node uid
-            right_uid: Right fragment node uid
-            tsd_info: Target Site Duplication information (optional)
-            
-        Returns:
-            self for method chaining
-        """
-        # Verify all node UIDs exist
-        if not all(uid in self.nodes for uid in [target_uid, cutter_uid, left_uid, right_uid]):
-            return self
-            
-        # Initialize cuts entry if not present
-        if target_uid not in self.cuts:
-            self.cuts[target_uid] = []
-            
-        # Add cut record
-        cut_record = (position, cutter_uid, left_uid, right_uid, tsd_info or {})
-        self.cuts[target_uid].append(cut_record)
-        
-        # Sort cuts by position
-        self.cuts[target_uid].sort(key=lambda x: x[0])
-        
-        # Update reverse index
-        if cutter_uid not in self.cut_targets:
-            self.cut_targets[cutter_uid] = []
-        if target_uid not in self.cut_targets[cutter_uid]:
-            self.cut_targets[cutter_uid].append(target_uid)
-            
-        # Record fragment information - left fragment
-        left_is_left = True  # Left fragment is a left fragment
-        self.fragments[left_uid] = (target_uid, position, left_is_left, cutter_uid)
-        
-        # Record fragment information - right fragment
-        right_is_left = False  # Right fragment is a right fragment
-        self.fragments[right_uid] = (target_uid, position, right_is_left, cutter_uid)
-        
-        return self
-        
+
     def add_cut_relation(self, cutter_uid: int, cut_uid: int, left_uid: int, right_uid: int):
         """
-        Add a cutting relationship. Compatibility method for the old interface.
+        添加切割关系
 
         Args:
-            cutter_uid: The donor performing the cut
-            cut_uid: The donor being cut
-            left_uid: Left fragment UID
-            right_uid: Right fragment UID
-            
-        Returns:
-            self for method chaining
+            cutter_uid: 切割者donor的UID
+            cut_uid: 被切割donor的UID
+            left_uid: 切割后左片段的UID
+            right_uid: 切割后右片段的UID
         """
-        # Get the position from the cutter node
-        position = self.nodes.get(cutter_uid, {}).get('position', 0)
-        
-        # Use record_cut to add the relationship
-        return self.record_cut(cut_uid, position, cutter_uid, left_uid, right_uid)
-        
-    def update_uid(self, old_uid: int, new_uid: int):
-        """
-        Update all references to old_uid with new_uid throughout the graph.
-
-        Args:
-            old_uid: The uid to replace
-            new_uid: The new uid to use
-            
-        Returns:
-            self for method chaining
-        """
-        # Skip if old_uid and new_uid are the same
-        if old_uid == new_uid:
+        # 确保节点存在
+        if not all(uid in self.nodes for uid in [cutter_uid, cut_uid, left_uid, right_uid]):
             return self
 
-        # 1. Update nodes dict
-        if old_uid in self.nodes:
-            self.nodes[new_uid] = self.nodes.pop(old_uid)
-            
-        # 2. Update cuts dict (as target)
-        if old_uid in self.cuts:
-            self.cuts[new_uid] = self.cuts.pop(old_uid)
-            
-        # 3. Update references within cuts
-        for target_uid in list(self.cuts.keys()):
-            for i, (position, cutter, left, right, tsd) in enumerate(self.cuts[target_uid]):
-                updated_record = (
-                    position,
-                    new_uid if cutter == old_uid else cutter,
-                    new_uid if left == old_uid else left,
-                    new_uid if right == old_uid else right,
-                    tsd
-                )
-                self.cuts[target_uid][i] = updated_record
-                
-        # 4. Update fragments dict (as fragment)
-        if old_uid in self.fragments:
-            self.fragments[new_uid] = self.fragments.pop(old_uid)
-            
-        # 5. Update references within fragments
-        for frag_uid in list(self.fragments.keys()):
-            orig, pos, is_left, cutter = self.fragments[frag_uid]
-            updated_record = (
-                new_uid if orig == old_uid else orig,
-                pos,
-                is_left,
-                new_uid if cutter == old_uid else cutter
-            )
-            self.fragments[frag_uid] = updated_record
-            
-        # 6. Update cut_targets dict (as cutter)
-        if old_uid in self.cut_targets:
-            self.cut_targets[new_uid] = self.cut_targets.pop(old_uid)
-            
-        # 7. Update references within cut_targets
-        for cutter_uid in self.cut_targets:
-            targets = self.cut_targets[cutter_uid]
-            self.cut_targets[cutter_uid] = [new_uid if t == old_uid else t for t in targets]
+        # 添加切割关系
+        if cutter_uid not in self.cuts:
+            self.cuts[cutter_uid] = []
+        self.cuts[cutter_uid].append((cut_uid, left_uid, right_uid))
+
+        # 添加反向切割关系
+        if cut_uid not in self.cut_by:
+            self.cut_by[cut_uid] = []
+        self.cut_by[cut_uid].append((cutter_uid, left_uid, right_uid))
+
+        # 记录片段关系
+        cut_position = self.nodes[cutter_uid]['position']
+        # 添加切割者信息到片段数据中
+        self.fragments[left_uid] = (cut_uid, cut_position, True, cutter_uid)  # True表示左片段
+        self.fragments[right_uid] = (cut_uid, cut_position, False, cutter_uid)  # False表示右片段
+
+        # 添加返回父片段的映射
+        self.fragment_to_original[left_uid] = cut_uid
+        self.fragment_to_original[right_uid] = cut_uid
+        
+        # 添加片段对应的切割者映射
+        self.fragment_to_cutter[left_uid] = cutter_uid
+        self.fragment_to_cutter[right_uid] = cutter_uid
 
         return self
 
     def is_fragment(self, uid: int) -> bool:
-        """Check if a node is a fragment."""
+        """判断指定UID的节点是否为片段"""
         return uid in self.fragments
 
-    def is_donor(self, uid: int) -> bool:
-        """Check if a node is a donor."""
-        return uid in self.nodes and self.nodes[uid].get('donor_id') is not None
-        
-    def is_cut(self, uid: int) -> bool:
-        """Check if a node has been cut."""
-        return uid in self.cuts and len(self.cuts[uid]) > 0
-        
-    def get_fragments(self, uid: int) -> list:
-        """Get all fragments of a given original node."""
-        return [frag_uid for frag_uid, (orig_uid, _, _, _) in self.fragments.items() 
-                if orig_uid == uid]
-                
-    def get_cutters(self, uid: int) -> list:
-        """Get all cutters of a given node."""
-        if uid in self.cuts:
-            return [cutter_uid for _, cutter_uid, _, _, _ in self.cuts[uid]]
-        return []
-        
-    def get_cut_targets(self, uid: int) -> list:
-        """Get all targets cut by a given cutter."""
-        return self.cut_targets.get(uid, [])
-        
-    def _topological_sort(self, uids=None) -> list:
+    def get_original_donor(self, uid: int) -> int:
+        """获取片段对应的原始donor UID"""
+        return self.fragment_to_original.get(uid, uid)
+
+    def get_fragment_cutter(self, uid: int) -> int:
+        """获取产生片段的切割者UID"""
+        return self.fragment_to_cutter.get(uid)
+
+    def get_all_fragments(self, original_uid: int) -> list:
+        """获取原始donor的所有片段"""
+        return [uid for uid, (orig, _, _, _) in self.fragments.items() if orig == original_uid]
+    
+    def get_fragments_by_cutter(self, original_uid: int, cutter_uid: int) -> list:
+        """获取特定切割者产生的原始donor的片段"""
+        return [uid for uid, (orig, _, _, cutter) in self.fragments.items() 
+                if orig == original_uid and cutter == cutter_uid]
+
+    def get_cut_by(self, cut_uid: int) -> list:
+        """获取切割了指定donor的所有donor信息"""
+        return self.cut_by.get(cut_uid, [])
+
+    def get_cuts(self, cutter_uid: int) -> list:
+        """获取被指定donor切割的所有donor信息"""
+        return self.cuts.get(cutter_uid, [])
+
+    def reconstruct_donors(self, seq_id: str) -> tuple:
         """
-        Perform topological sort on nodes based on cut dependencies.
-        
-        Args:
-            uids: Optional list of uids to sort (defaults to all)
-            
-        Returns:
-            Topologically sorted list of uids
-        """
-        if uids is None:
-            uids = list(self.nodes.keys())
-            
-        # Build dependency graph
-        dependencies = {uid: set() for uid in uids}
-        for uid in uids:
-            if uid in self.cuts:
-                for _, cutter_uid, _, _, _ in self.cuts[uid]:
-                    if cutter_uid in uids:
-                        dependencies[cutter_uid].add(uid)
-                        
-        # Calculate in-degrees
-        in_degree = {uid: 0 for uid in uids}
-        for uid in uids:
-            for dep in dependencies[uid]:
-                in_degree[dep] += 1
-                
-        # Topological sort using BFS
-        queue = [uid for uid in uids if in_degree[uid] == 0]
-        result = []
-        
-        while queue:
-            node = queue.pop(0)
-            result.append(node)
-            
-            for dep in dependencies[node]:
-                in_degree[dep] -= 1
-                if in_degree[dep] == 0:
-                    queue.append(dep)
-                    
-        # Check for cycles
-        if len(result) != len(uids):
-            # Handle cycle by adding remaining nodes in some order
-            for uid in uids:
-                if uid not in result:
-                    result.append(uid)
-                    
-        return result
-        
-    def rebuild_sequence(self, uid: int) -> str:
-        """
-        Rebuild the complete sequence with all nested insertions.
+        改进的donor重建算法，处理多重切割情况。使用迭代方法代替递归，以更好地处理循环依赖。
 
         Args:
-            uid: Node uid to rebuild
+            seq_id: 序列标识符，用于构建输出记录ID
 
         Returns:
-            Reconstructed sequence
+            tuple: (重建的donor记录列表, 排除的UID集合)
         """
-        # Get original sequence
-        if uid not in self.nodes:
-            return ""
-        
-        # If this is a fragment, retrieve and rebuild the original
-        if uid in self.fragments:
-            original_uid, _, _, _ = self.fragments[uid]
-            return self.rebuild_sequence(original_uid)
-        
-        sequence = self.nodes[uid]['sequence']
-        
-        # If no cuts, return original
-        if uid not in self.cuts or not self.cuts[uid]:
-            return sequence
-            
-        # Sort cuts by position (smallest to largest to maintain correct indices)
-        cuts = sorted(self.cuts[uid], key=lambda x: x[0])
-        
-        # Track offset for adjusting positions as we insert
-        offset = 0
-        
-        # Apply each cut in order
-        for position, cutter_uid, _, _, tsd_info in cuts:
-            # Rebuild cutter sequence
-            cutter_seq = self.rebuild_sequence(cutter_uid)
-            
-            # Adjust position with current offset
-            adj_position = position + offset
-            
-            # Insert cutter sequence at adjusted position
-            sequence = sequence[:adj_position] + cutter_seq + sequence[adj_position:]
-            
-            # Update offset for next insertion
-            offset += len(cutter_seq)
-                
-        return sequence
-        
-    def rebuild_clean_sequence(self, uid: int) -> str:
-        """
-        Rebuild the sequence without nested insertions.
-        
-        Args:
-            uid: Node uid to rebuild
-            
-        Returns:
-            Clean sequence with all insertions removed
-        """
-        # Get original sequence
-        if uid not in self.nodes:
-            return ""
-            
-        # For fragments, retrieve and rebuild the original
-        if uid in self.fragments:
-            original_uid, _, _, _ = self.fragments[uid]
-            return self.rebuild_clean_sequence(original_uid)
-            
-        # Return the original sequence - the clean sequence is just the node's sequence
-        return self.nodes[uid]['sequence']
-        
-    def generate_donor_records(self, seq_id: str) -> tuple:
-        """
-        Generate donor sequence records with reconstructions.
-        
-        Args:
-            seq_id: Base sequence identifier
-            
-        Returns:
-            (donor_records, reconstructed_donors)
-        """
-        from utils import create_sequence_record
-        
-        donor_records = []
-        reconstructed_donors = []
-        
-        # Find all donor nodes (those with donor_id)
-        donor_uids = [uid for uid, info in self.nodes.items() 
-                     if info.get('donor_id') is not None]
-                     
-        # Generate records for each donor
-        for uid in donor_uids:
-            node_info = self.nodes[uid]
-            
-            # Skip fragments
-            if self.is_fragment(uid):
+        reconstructed = []
+        excluded = set()
+
+        # 收集所有切割关系
+        cut_relations = {}  # donor_uid -> [(cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq)]
+
+        # 预处理所有切割关系
+        for donor_uid, cut_info_list in self.cut_by.items():
+            cut_relations[donor_uid] = []
+            for cutter_uid, left_uid, right_uid in cut_info_list:
+                # 验证节点存在
+                if not all(uid in self.nodes for uid in [donor_uid, cutter_uid, left_uid, right_uid]):
+                    continue
+
+                try:
+                    left_seq = self.nodes[left_uid]['sequence']
+                    right_seq = self.nodes[right_uid]['sequence']
+                    cutter_seq = self.nodes[cutter_uid]['sequence']
+                    cut_relations[donor_uid].append((cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq))
+                except KeyError:
+                    continue
+
+        # 待处理donor队列
+        to_process = list(cut_relations.keys())
+
+        # 优先处理被切割次数多的donor
+        to_process.sort(key=lambda uid: len(cut_relations.get(uid, [])), reverse=True)
+
+        while to_process:
+            # 获取下一个待处理的donor
+            donor_uid = to_process.pop(0)
+
+            # 如果已处理过，跳过
+            if donor_uid in excluded:
                 continue
 
-            # Get position information
-            position = node_info.get('position', 0)
-            
-            # Create donor record
-            donor_id = f"{seq_id}_{position}_{position+node_info['length']}-+-{node_info['length']}"
-            if node_info.get('donor_id'):
-                donor_id += f"-{node_info['donor_id']}"
-                
-            donor_seq = node_info['sequence']
-            donor_record = create_sequence_record(donor_seq, donor_id)
-            donor_record.annotations["uid"] = uid
-            donor_record.annotations["position"] = position
-            donor_record.annotations["length"] = node_info['length']
-            
-            donor_records.append(donor_record)
-            
-            # Only create reconstructions for cut or cutter donors
-            is_cut_donor = self.is_cut(uid)
-            is_cutter = uid in self.cut_targets and self.cut_targets[uid]
-            
-            # Skip reconstructions for simple donors (not cut and not cutting others)
-            if not is_cut_donor and not is_cutter:
+            # 获取有效的切割关系
+            relations = cut_relations.get(donor_uid, [])
+            if not relations:
                 continue
-                
-            # Generate full reconstruction with all nested inserts
-            full_seq = self.rebuild_sequence(uid)
-            full_id = f"{seq_id}_reconstructed_{uid}"
-            full_rec = create_sequence_record(full_seq, full_id)
-            full_rec.annotations["reconstruction_type"] = "full"
-            full_rec.annotations["original_uid"] = uid
-            
-            # Add all cutters information
-            cutters = self.get_cutters(uid)
-            if cutters:
-                full_rec.annotations["cutters"] = cutters
-                
-            reconstructed_donors.append(full_rec)
-            
-            # Generate clean reconstruction without inserts
-            clean_seq = self.rebuild_clean_sequence(uid)
-            clean_id = f"{seq_id}_clean_reconstructed_{uid}"
+
+            # 筛选出cutter尚未被处理的切割关系
+            valid_relations = [r for r in relations if r[0] not in excluded]
+
+            # 如果没有有效切割关系，视为处理过
+            if not valid_relations:
+                excluded.add(donor_uid)
+                continue
+
+            # 判断是否存在多重切割
+            is_multiple_cuts = len(valid_relations) > 1
+
+            # 处理每个有效切割关系，生成完整重建
+            for relation in valid_relations:
+                cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = relation
+
+                # 创建完整重建
+                full_seq = left_seq + cutter_seq + right_seq
+                full_id = f"{seq_id}_reconstructed_{donor_uid}_{cutter_uid}"
+                full_rec = create_sequence_record(full_seq, full_id)
+                full_rec.annotations["reconstruction_type"] = "full"
+                full_rec.annotations["original_uid"] = donor_uid
+                full_rec.annotations["cutter_uid"] = cutter_uid
+                full_rec.annotations["left_uid"] = left_uid
+                full_rec.annotations["right_uid"] = right_uid
+
+                # 将完整重建添加到结果列表
+                reconstructed.append(full_rec)
+
+            # 使用第一个切割关系创建清洁重建
+            first_relation = valid_relations[0]
+            cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = first_relation
+
+            clean_seq = left_seq + right_seq
+            clean_id = f"{seq_id}_clean_reconstructed_{donor_uid}"
             clean_rec = create_sequence_record(clean_seq, clean_id)
             clean_rec.annotations["reconstruction_type"] = "clean"
-            clean_rec.annotations["original_uid"] = uid
-            
-            # Add multiple cuts annotation if needed
-            if len(cutters) > 1:
+            clean_rec.annotations["original_uid"] = donor_uid
+            clean_rec.annotations["left_uid"] = left_uid
+            clean_rec.annotations["right_uid"] = right_uid
+
+            # 多重切割标记
+            if is_multiple_cuts:
                 clean_rec.annotations["multiple_cuts"] = True
-                clean_rec.annotations["cut_count"] = len(cutters)
-                clean_rec.annotations["all_cutters"] = cutters
-                
-            reconstructed_donors.append(clean_rec)
-            
-        return donor_records, reconstructed_donors
+                clean_rec.annotations["cut_count"] = len(valid_relations)
+                clean_rec.annotations["all_cutters"] = [r[0] for r in valid_relations]
+
+            # 将清洁重建添加到结果列表
+            reconstructed.append(clean_rec)
+
+            # 标记当前donor为已处理
+            excluded.add(donor_uid)
+
+            # 如果还存在循环依赖，需要特殊处理
+            # 先找出待处理列表中互相切割的donor对
+            cyclic_pairs = []
+            for i, uid1 in enumerate(to_process):
+                for uid2 in to_process[i+1:]:
+                    # 检查uid1是否切割uid2
+                    cuts_forward = any(r[0] == uid1 for r in cut_relations.get(uid2, []))
+                    # 检查uid2是否切割uid1
+                    cuts_backward = any(r[0] == uid2 for r in cut_relations.get(uid1, []))
+
+                    if cuts_forward and cuts_backward:
+                        cyclic_pairs.append((uid1, uid2))
+
+            # 对每个循环依赖对，强制处理其切割关系
+            for uid1, uid2 in cyclic_pairs:
+                # 如果已处理过，跳过
+                if uid1 in excluded or uid2 in excluded:
+                    continue
+
+                # 处理 uid1 切割 uid2
+                for relation in cut_relations.get(uid2, []):
+                    if relation[0] != uid1:
+                        continue
+
+                    cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = relation
+
+                    # 创建完整重建 (uid1切割uid2)
+                    full_seq = left_seq + cutter_seq + right_seq
+                    full_id = f"{seq_id}_reconstructed_{uid2}_{uid1}_CYCLIC"
+                    full_rec = create_sequence_record(full_seq, full_id)
+                    full_rec.annotations["reconstruction_type"] = "full"
+                    full_rec.annotations["original_uid"] = uid2
+                    full_rec.annotations["cutter_uid"] = uid1
+                    full_rec.annotations["left_uid"] = left_uid
+                    full_rec.annotations["right_uid"] = right_uid
+                    full_rec.annotations["cyclic"] = True
+
+                    # 将完整重建添加到结果列表
+                    reconstructed.append(full_rec)
+
+                # 处理 uid2 切割 uid1
+                for relation in cut_relations.get(uid1, []):
+                    if relation[0] != uid2:
+                        continue
+
+                    cutter_uid, left_uid, right_uid, left_seq, right_seq, cutter_seq = relation
+
+                    # 创建完整重建 (uid2切割uid1)
+                    full_seq = left_seq + cutter_seq + right_seq
+                    full_id = f"{seq_id}_reconstructed_{uid1}_{uid2}_CYCLIC"
+                    full_rec = create_sequence_record(full_seq, full_id)
+                    full_rec.annotations["reconstruction_type"] = "full"
+                    full_rec.annotations["original_uid"] = uid1
+                    full_rec.annotations["cutter_uid"] = uid2
+                    full_rec.annotations["left_uid"] = left_uid
+                    full_rec.annotations["right_uid"] = right_uid
+                    full_rec.annotations["cyclic"] = True
+
+                    # 将完整重建添加到结果列表
+                    reconstructed.append(full_rec)
+
+        return reconstructed, excluded
 
     def to_graphviz_dot(self) -> str:
         """
-        Generate a Graphviz DOT representation for visualization.
+        生成Graphviz DOT格式可视化
 
         Returns:
-            Graphviz DOT format string
+            str: Graphviz DOT格式字符串
         """
-        # Initialize DOT string
-        dot_lines = ["digraph HierarchicalNestingGraph {",
+        # 初始化DOT头部
+        dot_header = ["digraph DonorNestingGraph {",
                       "  bgcolor=\"#FFF\";",
                       "  node [fontcolor=\"#000\", shape=box, style=filled];",
                       "  edge [fontcolor=\"#000\", penwidth=2.0];"]
         
-        # Generate nodes
-        for uid, info in self.nodes.items():
-            # Determine node type and color
-            if self.is_fragment(uid):
-                # Get fragment info
-                orig_uid, pos, is_left, cutter_uid = self.fragments[uid]
+        # 收集用到的节点
+        used_nodes = set()
+        edge_lines = []
+        
+        # 添加切割关系边，同时收集用到的节点
+        for cutter_uid, cut_list in self.cuts.items():
+            for cut_uid, left_uid, right_uid in cut_list:
+                # 收集用到的节点
+                used_nodes.add(cutter_uid)
+                used_nodes.add(cut_uid)
+                used_nodes.add(left_uid)
+                used_nodes.add(right_uid)
                 
-                # Set color based on fragment type
-                if is_left:
-                    color = "lightblue"
-                    node_type = "L Fragment"
-                else:
-                    color = "lightpink"
-                    node_type = "R Fragment"
-                    
-                # Create label
-                label = f"{node_type}\\nUID: {uid}\\nFrom: {orig_uid}\\nLen: {info['length']}"
+                # 添加切割者到被切割者的边
+                edge_lines.append(f'  node_{cutter_uid} -> node_{cut_uid} [label="cuts", color="black"];')
                 
-            elif self.is_donor(uid):
-                if uid in self.cut_targets and self.cut_targets[uid]:
-                    # This is a cutter
+                # 添加被切割者到左右片段的边，添加切割者信息
+                edge_lines.append(f'  node_{cut_uid} -> node_{left_uid} [label="L\\nby {cutter_uid}", style="dashed", color="blue"];')
+                edge_lines.append(f'  node_{cut_uid} -> node_{right_uid} [label="R\\nby {cutter_uid}", style="dashed", color="red"];')
+        
+        # 只为用到的节点生成节点代码
+        node_lines = []
+        for uid in used_nodes:
+            if uid in self.nodes:
+                info = self.nodes[uid]
+                
+                node_type = "Donor"
+                fragment_info = ""
+                
+                # 默认节点为浅绿色
+                color = "lightgreen"
+                
+                # 根据节点类型设置颜色
+                if uid in self.cuts:
+                    # 是切割者，用moccasin
                     color = "moccasin"
                     node_type = "Cutter"
-                else:
-                    # Regular donor
-                    color = "lightgreen"
-                    node_type = "Donor"
+                elif self.is_fragment(uid):
+                    orig_uid, pos, is_left, cutter_uid = self.fragments[uid]
                     
-                # Create label
-                position = info.get('position', 'N/A')
-                label = f"{node_type}\\nUID: {uid}\\nLen: {info['length']}"
-                if position != 'N/A':
-                    label += f"\\nPos: {position}"
-                if info.get('donor_id'):
-                    label += f"\\nID: {info['donor_id']}"
-            else:
-                # Regular node
-                color = "lightgrey"
-                node_type = "Node"
-                
-                # Create label
-                label = f"{node_type}\\nUID: {uid}\\nLen: {info['length']}"
-                
-            # Add node to DOT
-            dot_lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
-            
-        # Generate edges
-        for target_uid, cuts in self.cuts.items():
-            for position, cutter_uid, left_uid, right_uid, _ in cuts:
-                # Add cutter to target edge
-                dot_lines.append(f'  node_{cutter_uid} -> node_{target_uid} [label="cuts@{position}", color="black"];')
-                
-                # Add target to fragments edges
-                dot_lines.append(f'  node_{target_uid} -> node_{left_uid} [label="L", style="dashed", color="blue"];')
-                dot_lines.append(f'  node_{target_uid} -> node_{right_uid} [label="R", style="dashed", color="red"];')
-                
-        # Close graph
-        dot_lines.append("}")
-        
-        return "\n".join(dot_lines)
-        
-    def validate_graph(self) -> tuple:
-        """
-        Validate graph consistency.
-        
-        Returns:
-            (is_valid, errors)
-        """
-        errors = []
-        
-        # Check that all referenced UIDs exist
-        referenced_uids = set()
-        
-        # Collect references from cuts
-        for target_uid, cut_list in self.cuts.items():
-            referenced_uids.add(target_uid)
-            for _, cutter_uid, left_uid, right_uid, _ in cut_list:
-                referenced_uids.update([cutter_uid, left_uid, right_uid])
-                
-        # Collect references from fragments
-        for frag_uid, (orig_uid, _, _, cutter_uid) in self.fragments.items():
-            referenced_uids.update([frag_uid, orig_uid, cutter_uid])
-            
-        # Collect references from cut_targets
-        for cutter_uid, target_list in self.cut_targets.items():
-            referenced_uids.add(cutter_uid)
-            referenced_uids.update(target_list)
-            
-        # Check for undefined references
-        undefined_uids = referenced_uids - set(self.nodes.keys())
-        if undefined_uids:
-            errors.append(f"Undefined UID references: {undefined_uids}")
-            
-        # Check consistency between cuts and fragments
-        for target_uid, cut_list in self.cuts.items():
-            for _, cutter_uid, left_uid, right_uid, _ in cut_list:
-                # Verify left fragment reference
-                if left_uid not in self.fragments:
-                    errors.append(f"Left fragment {left_uid} not in fragments dictionary")
-                else:
-                    frag_orig, _, is_left, frag_cutter = self.fragments[left_uid]
-                    if frag_orig != target_uid or not is_left or frag_cutter != cutter_uid:
-                        errors.append(f"Fragment {left_uid} has inconsistent information")
-                        
-                # Verify right fragment reference
-                if right_uid not in self.fragments:
-                    errors.append(f"Right fragment {right_uid} not in fragments dictionary")
-                else:
-                    frag_orig, _, is_left, frag_cutter = self.fragments[right_uid]
-                    if frag_orig != target_uid or is_left or frag_cutter != cutter_uid:
-                        errors.append(f"Fragment {right_uid} has inconsistent information")
-                        
-        # Check consistency between cuts and cut_targets
-        for target_uid, cut_list in self.cuts.items():
-            for _, cutter_uid, _, _, _ in cut_list:
-                if cutter_uid not in self.cut_targets:
-                    errors.append(f"Cutter {cutter_uid} not in cut_targets dictionary")
-                elif target_uid not in self.cut_targets[cutter_uid]:
-                    errors.append(f"Target {target_uid} not in cut_targets[{cutter_uid}]")
+                    # 添加片段信息
+                    fragment_info = f"\\nfrom {orig_uid}"
                     
-        for cutter_uid, target_list in self.cut_targets.items():
-            for target_uid in target_list:
-                if target_uid not in self.cuts:
-                    errors.append(f"Target {target_uid} in cut_targets but not in cuts")
-                else:
-                    cutter_found = False
-                    for _, cut_cutter, _, _, _ in self.cuts[target_uid]:
-                        if cut_cutter == cutter_uid:
-                            cutter_found = True
-                            break
-                    if not cutter_found:
-                        errors.append(f"Cutter {cutter_uid} not found in cuts[{target_uid}]")
-                        
-        return len(errors) == 0, errors
-        
-    def calculate_nesting_depth(self, uid: int, visited=None) -> int:
-        """
-        Calculate the nesting depth of a node.
-        
-        Args:
-            uid: Node uid
-            visited: Set of visited nodes to prevent infinite recursion
-            
-        Returns:
-            Nesting depth
-        """
-        if visited is None:
-            visited = set()
-            
-        # Check for already visited or non-existent node
-        if uid in visited or uid not in self.nodes:
-            return 0
-            
-        visited.add(uid)
-        
-        # If node has no cuts, depth is 0
-        if uid not in self.cuts or not self.cuts[uid]:
-            return 0
-            
-        # Calculate maximum depth of cutters
-        max_depth = 0
-        for _, cutter_uid, _, _, _ in self.cuts[uid]:
-            # Skip already visited nodes to avoid cycles
-            if cutter_uid not in visited:
-                cutter_depth = self.calculate_nesting_depth(cutter_uid, visited.copy())
-                max_depth = max(max_depth, cutter_depth)
-                
-        # Return max depth + 1 for this level
-        return max_depth + 1
-        
-    def reconstruct_donors(self, seq_id: str) -> tuple:
-        """
-        Compatibility method for DonorNestingGraph interface.
-        
-        Args:
-            seq_id: Base sequence identifier
-            
-        Returns:
-            (reconstructed_donors, excluded_uids)
-        """
-        # Get donor records and reconstructions
-        donor_records, reconstructed = self.generate_donor_records(seq_id)
-        
-        # Determine excluded UIDs (those with reconstructions)
-        excluded_uids = set()
-        for record in reconstructed:
-            if "original_uid" in record.annotations:
-                excluded_uids.add(record.annotations["original_uid"])
-                
-        return reconstructed, excluded_uids
+                    # 根据片段设置颜色
+                    if is_left:
+                        color = "lightblue"
+                        node_type = "L Fragment"
+                    else:
+                        color = "lightpink"
+                        node_type = "R Fragment"
 
-    # Compatibility methods for older interface
-    def get_original_donor(self, uid: int) -> int:
-        """Get the original donor UID for a fragment."""
-        if uid in self.fragments:
-            return self.fragments[uid][0]
-        return uid
+                # 安全获取节点长度
+                length = info.get('length', 0)
+                position = info.get('position', 'N/A')
+
+                # 创建标签
+                label = f"{node_type}\\nUID: {uid}\\nLen: {length}"
+                if position != 'N/A' and not self.is_fragment(uid):
+                    label += f"\\nPos: {position}"
+                label += fragment_info
+
+                node_lines.append(f'  node_{uid} [label="{label}", fillcolor="{color}"];')
         
-    def get_fragment_cutter(self, uid: int) -> int:
-        """Get the cutter that produced a fragment."""
-        if uid in self.fragments:
-            return self.fragments[uid][3]
-        return None
+        # 按照先节点后路径的顺序构造最终dot字符串
+        dot_body = node_lines + edge_lines
+        dot_footer = ["}"]
         
-    def get_all_fragments(self, original_uid: int) -> list:
-        """Get all fragments of a given original donor."""
-        return self.get_fragments(original_uid)
-        
-    def get_fragments_by_cutter(self, original_uid: int, cutter_uid: int) -> list:
-        """Get fragments of a donor produced by a specific cutter."""
-        return [uid for uid, (orig, _, _, cutter) in self.fragments.items() 
-                if orig == original_uid and cutter == cutter_uid]
-                
-    def get_cut_by(self, cut_uid: int) -> list:
-        """Get all cutters that cut a specific donor."""
-        return [(cutter, left, right) for pos, cutter, left, right, _ in self.cuts.get(cut_uid, [])]
-        
-    def get_cuts(self, cutter_uid: int) -> list:
-        """Get all donors cut by a specific cutter."""
-        result = []
-        for target in self.cut_targets.get(cutter_uid, []):
-            for pos, cutter, left, right, _ in self.cuts.get(target, []):
-                if cutter == cutter_uid:
-                    result.append((target, left, right))
-        return result
+        return '\n'.join(dot_header + dot_body + dot_footer)
 
 class SequenceTree:
     """
@@ -828,7 +617,7 @@ class SequenceTree:
         self.root = self._create_node(initial_seq, False)
 
         # 创建嵌套关系图
-        self.nesting_graph = HierarchicalNestingGraph()
+        self.nesting_graph = DonorNestingGraph()
 
         # 将根节点添加到嵌套关系图
         self.nesting_graph.add_node(self.root.uid, initial_seq)
@@ -1320,7 +1109,7 @@ class SequenceTree:
         return '\n'.join(dot_str)
 
     @staticmethod
-    def _build_graphviz_dot_nodes_edges(node: SequenceNode, nesting_graph: HierarchicalNestingGraph,
+    def _build_graphviz_dot_nodes_edges(node: SequenceNode, nesting_graph: DonorNestingGraph,
                                         abs_pos: int = 0) -> tuple:
         """
         Recursively build nodes and edges for Graphviz visualization.
