@@ -522,9 +522,9 @@ class DonorNestingGraph:
         """
         # 初始化DOT头部
         dot_header = ["digraph DonorNestingGraph {",
-                      "  bgcolor=\"#FFF\";",
-                      "  node [fontcolor=\"#000\", shape=box, style=filled];",
-                      "  edge [fontcolor=\"#000\", penwidth=2.0];"]
+                      "  bgcolor=\"#FFFFFF\";",
+                      "  node [fontcolor=\"#000000\", shape=box, style=filled];",
+                      "  edge [fontcolor=\"#000000\", penwidth=2.0];"]
         
         # 收集用到的节点
         used_nodes = set()
@@ -1086,9 +1086,9 @@ class SequenceTree:
 
         # Initialize the DOT string with graph declaration
         dot_str = ["digraph SequenceTree {",
-                   "  bgcolor=\"#FFF\";",
-                   "  node [fontcolor=\"#000\", shape=box, style=filled];",
-                   "  edge [fontcolor=\"#000\", penwidth=2.0];"]
+                   "  bgcolor=\"#FFFFFF\";",
+                   "  node [fontcolor=\"#000000\", shape=box, style=filled];",
+                   "  edge [fontcolor=\"#000000\", penwidth=2.0];"]
 
         # Generate nodes and edges through recursive traversal
         nodes, edges = SequenceTree._build_graphviz_dot_nodes_edges(self.root, self.nesting_graph)
