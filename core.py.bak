@@ -250,13 +250,9 @@ class HierarchicalNestingGraph:
         if target_uid not in self.cut_targets[cutter_uid]:
             self.cut_targets[cutter_uid].append(target_uid)
             
-        # Record fragment information - left fragment
-        left_is_left = True  # Left fragment is a left fragment
-        self.fragments[left_uid] = (target_uid, position, left_is_left, cutter_uid)
-        
-        # Record fragment information - right fragment
-        right_is_left = False  # Right fragment is a right fragment
-        self.fragments[right_uid] = (target_uid, position, right_is_left, cutter_uid)
+        # Record fragment information
+        self.fragments[left_uid] = (target_uid, position, True, cutter_uid)
+        self.fragments[right_uid] = (target_uid, position, False, cutter_uid)
         
         return self
         
@@ -430,36 +426,42 @@ class HierarchicalNestingGraph:
         if uid not in self.nodes:
             return ""
         
-        # If this is a fragment, retrieve and rebuild the original
-        if uid in self.fragments:
-            original_uid, _, _, _ = self.fragments[uid]
-            return self.rebuild_sequence(original_uid)
-        
         sequence = self.nodes[uid]['sequence']
         
         # If no cuts, return original
         if uid not in self.cuts or not self.cuts[uid]:
             return sequence
             
-        # Sort cuts by position (smallest to largest to maintain correct indices)
-        cuts = sorted(self.cuts[uid], key=lambda x: x[0])
+        # Get all cuts and sort by position (largest first)
+        cuts = sorted(self.cuts[uid], key=lambda x: x[0], reverse=True)
         
-        # Track offset for adjusting positions as we insert
-        offset = 0
-        
-        # Apply each cut in order
-        for position, cutter_uid, _, _, tsd_info in cuts:
+        # Apply cuts from largest position to smallest
+        for position, cutter_uid, left_uid, right_uid, tsd_info in cuts:
             # Rebuild cutter sequence
             cutter_seq = self.rebuild_sequence(cutter_uid)
             
-            # Adjust position with current offset
-            adj_position = position + offset
-            
-            # Insert cutter sequence at adjusted position
-            sequence = sequence[:adj_position] + cutter_seq + sequence[adj_position:]
-            
-            # Update offset for next insertion
-            offset += len(cutter_seq)
+            # Handle TSD if present
+            if tsd_info and 'length' in tsd_info and tsd_info['length'] > 0:
+                # Apply TSD modifications based on available TSD information
+                tsd_len = tsd_info.get('length', 0)
+                if tsd_len > 0:
+                    if 'tsd_5' in tsd_info and 'tsd_3' in tsd_info:
+                        # Use provided TSD sequences
+                        tsd_5 = tsd_info.get('tsd_5', '')
+                        tsd_3 = tsd_info.get('tsd_3', '')
+                    else:
+                        # Extract from the original sequence
+                        source_tsd = sequence[position:position+min(tsd_len, len(sequence)-position)]
+                        tsd_5 = tsd_3 = source_tsd
+                        
+                    # Insert cutter with TSD
+                    sequence = sequence[:position] + tsd_5 + cutter_seq + tsd_3 + sequence[position:]
+                else:
+                    # No TSD, simple insertion
+                    sequence = sequence[:position] + cutter_seq + sequence[position:]
+            else:
+                # No TSD, simple insertion
+                sequence = sequence[:position] + cutter_seq + sequence[position:]
                 
         return sequence
         
@@ -477,13 +479,39 @@ class HierarchicalNestingGraph:
         if uid not in self.nodes:
             return ""
             
+        sequence = self.nodes[uid]['sequence']
+        
+        # If no cuts, return original
+        if uid not in self.cuts or not self.cuts[uid]:
+            return sequence
+            
         # For fragments, retrieve and rebuild the original
         if uid in self.fragments:
             original_uid, _, _, _ = self.fragments[uid]
             return self.rebuild_clean_sequence(original_uid)
             
-        # Return the original sequence - the clean sequence is just the node's sequence
-        return self.nodes[uid]['sequence']
+        # Get all cuts and sort by position (largest first)
+        cuts = sorted(self.cuts[uid], key=lambda x: x[0], reverse=True)
+        
+        # Join left and right fragments directly
+        left_fragments = []
+        right_fragments = []
+        
+        for position, _, left_uid, right_uid, tsd_info in cuts:
+            left_seq = self.nodes[left_uid]['sequence']
+            right_seq = self.nodes[right_uid]['sequence']
+            
+            # Handle TSD if present
+            if tsd_info and 'length' in tsd_info and tsd_info['length'] > 0:
+                tsd_len = tsd_info.get('length', 0)
+                # Remove duplicate TSD
+                if len(right_seq) > tsd_len:
+                    right_seq = right_seq[tsd_len:]
+                
+            # Build clean sequence by combining fragments
+            sequence = left_seq + right_seq
+            
+        return sequence
         
     def generate_donor_records(self, seq_id: str) -> tuple:
         """
@@ -504,13 +532,16 @@ class HierarchicalNestingGraph:
         donor_uids = [uid for uid, info in self.nodes.items() 
                      if info.get('donor_id') is not None]
                      
+        # Find cut donors
+        cut_donors = [uid for uid in donor_uids if self.is_cut(uid)]
+        
         # Generate records for each donor
         for uid in donor_uids:
             node_info = self.nodes[uid]
             
             # Skip fragments
             if self.is_fragment(uid):
-                continue
+                        continue
 
             # Get position information
             position = node_info.get('position', 0)
@@ -528,14 +559,11 @@ class HierarchicalNestingGraph:
             
             donor_records.append(donor_record)
             
-            # Only create reconstructions for cut or cutter donors
-            is_cut_donor = self.is_cut(uid)
-            is_cutter = uid in self.cut_targets and self.cut_targets[uid]
+        # Generate reconstructions for cut donors
+        for uid in cut_donors:
+            node_info = self.nodes[uid]
+            position = node_info.get('position', 0)
             
-            # Skip reconstructions for simple donors (not cut and not cutting others)
-            if not is_cut_donor and not is_cutter:
-                continue
-                
             # Generate full reconstruction with all nested inserts
             full_seq = self.rebuild_sequence(uid)
             full_id = f"{seq_id}_reconstructed_{uid}"
