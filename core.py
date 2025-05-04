@@ -211,21 +211,21 @@ class SequenceTree:
     def __iter__(self):
         yield from self.root
 
-    def _get_next_uid(self) -> int:
+    def _get_next_uid(self, reuse: bool = False) -> int:
         """Get the next available UID from the UID management system"""
-        if self.available_uids:
+        if reuse and self.available_uids:
             return self.available_uids.pop(0)
 
         uid = self.next_uid
         self.next_uid += 1
         return uid
 
-    def _release_uid(self, uid: int):
+    def _release_uid(self, uid: int, reuse: bool = False):
         """Release an UID back to the UID management system"""
         if uid in self.node_dict:
             del self.node_dict[uid]
 
-        if uid not in self.available_uids:
+        if reuse and uid not in self.available_uids:
             self.available_uids.append(uid)
 
     def _create_node(self, data: str, is_donor: bool = False, donor_id: str = None, uid: int = None) -> SequenceNode:
@@ -315,14 +315,6 @@ class SequenceTree:
                     donor_node = self._create_node(donor_seq, True, donor_id, donor_node_uid)
                     current.left = donor_node
                     
-                    # Record direct insertion event
-                    self.event_journal.record_insertion(
-                        donor_uid=donor_node_uid,
-                        target_uid=current.uid,
-                        left_uid=0,  # No fragments for direct insertion
-                        right_uid=0, 
-                        tsd_info=None
-                    )
                     
                     current.update()
                     break
@@ -390,23 +382,9 @@ class SequenceTree:
                         right_uid=right_node_uid,
                         tsd_info=tsd_info
                     )
-                else:
-                    # Even for non-donor nodes, record the insertion event
-                    tsd_info = None
-                    if tsd_length > 0:
-                        tsd_info = {
-                            'length': tsd_length,
-                            'tsd_5': tsd_5,
-                            'tsd_3': tsd_3
-                        }
-                    
-                    self.event_journal.record_insertion(
-                        donor_uid=donor_node_uid,
-                        target_uid=old_node_uid,
-                        left_uid=left_node_uid,
-                        right_uid=right_node_uid,
-                        tsd_info=tsd_info
-                    )
+
+                # Release old node UID (Do not reuse it)
+                self._release_uid(old_node_uid)
 
                 # Update node information
                 current.data = donor_seq
@@ -436,14 +414,6 @@ class SequenceTree:
                     donor_node = self._create_node(donor_seq, True, donor_id, donor_node_uid)
                     current.right = donor_node
                     
-                    # Record direct insertion event
-                    self.event_journal.record_insertion(
-                        donor_uid=donor_node_uid,
-                        target_uid=current.uid,
-                        left_uid=0,  # No fragments for direct insertion
-                        right_uid=0, 
-                        tsd_info=None
-                    )
                     
                     current.update()
                     break
@@ -508,14 +478,6 @@ class SequenceTree:
                 donor_node = self._create_node(donor_seq, True, donor_id, donor_node_uid)
                 node.left = donor_node
                 
-                # Record direct insertion event
-                self.event_journal.record_insertion(
-                    donor_uid=donor_node_uid,
-                    target_uid=node.uid,
-                    left_uid=0,  # No fragments for direct insertion
-                    right_uid=0, 
-                    tsd_info=None
-                )
 
             node.update()
             return node.balance()
@@ -587,23 +549,9 @@ class SequenceTree:
                     right_uid=right_node_uid,
                     tsd_info=tsd_info
                 )
-            else:
-                # Even for non-donor nodes, record the insertion event
-                tsd_info = None
-                if tsd_length > 0:
-                    tsd_info = {
-                        'length': tsd_length,
-                        'tsd_5': tsd_5,
-                        'tsd_3': tsd_3
-                    }
-                
-                self.event_journal.record_insertion(
-                    donor_uid=donor_node_uid,
-                    target_uid=old_node_uid,
-                    left_uid=left_node_uid,
-                    right_uid=right_node_uid,
-                    tsd_info=tsd_info
-                )
+
+            # Release old node UID (Do not reuse it)
+            self._release_uid(old_node_uid)
 
             # Update node information
             node.data = donor_seq
@@ -628,15 +576,6 @@ class SequenceTree:
                 # Insert as right child - use preset UID
                 donor_node = self._create_node(donor_seq, True, donor_id, donor_node_uid)
                 node.right = donor_node
-                
-                # Record direct insertion event
-                self.event_journal.record_insertion(
-                    donor_uid=donor_node_uid,
-                    target_uid=node.uid,
-                    left_uid=0,  # No fragments for direct insertion
-                    right_uid=0, 
-                    tsd_info=None
-                )
 
             node.update()
             return node.balance()
