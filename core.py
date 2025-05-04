@@ -687,7 +687,7 @@ class SequenceTree:
                    "  edge [fontcolor=\"#000000\", penwidth=2.0];"]
 
         # Generate nodes and edges through recursive traversal
-        nodes, edges = SequenceTree._build_graphviz_dot_nodes_edges(self.root, self.nesting_graph)
+        nodes, edges = SequenceTree._build_graphviz_dot_nodes_edges(self.root, self.event_journal)
 
         # Add all nodes and edges to the DOT string
         for node in nodes:
@@ -699,13 +699,14 @@ class SequenceTree:
         return '\n'.join(dot_str)
 
     @staticmethod
-    def _build_graphviz_dot_nodes_edges(node: SequenceNode, nesting_graph: DonorNestingGraph,
-                                        abs_pos: int = 0) -> tuple:
+    def _build_graphviz_dot_nodes_edges(node: SequenceNode, event_journal,
+                                       abs_pos: int = 0) -> tuple:
         """
         Recursively build nodes and edges for Graphviz visualization.
 
         Args:
             node (SequenceNode): Current node
+            event_journal: Event journal instance for fragment detection
             abs_pos (int): Current absolute position (0-based)
 
         Returns:
@@ -749,11 +750,11 @@ class SequenceTree:
         # 4. 如果同时满足2和3，则为紫色
 
         # Check if this is a fragment of a cut donor
-        if nesting_graph.is_fragment(node.uid):
-            # Get fragment info (original_uid, position, is_left, cutter_uid)
-            fragment_info = nesting_graph.fragments.get(node.uid)
+        if event_journal.is_fragment(node.uid):
+            # Get fragment info (original_uid, is_left, cutter_uid)
+            fragment_info = event_journal.get_fragment_info(node.uid)
             if fragment_info:
-                _, pos, is_left, cutter_uid = fragment_info
+                original_uid, is_left, cutter_uid = fragment_info
                 half_type = "L" if is_left else "R"
                 cut_half = f"Cut: {half_type}, by {cutter_uid}"
                 fill_color = "lightpink"  # Cut fragments shown in pink
@@ -772,7 +773,7 @@ class SequenceTree:
         if node.left:
             # Left child should start at the same absolute position as its parent
             left_abs_pos = abs_pos
-            left_nodes, left_edges = SequenceTree._build_graphviz_dot_nodes_edges(node.left, nesting_graph, left_abs_pos)
+            left_nodes, left_edges = SequenceTree._build_graphviz_dot_nodes_edges(node.left, event_journal, left_abs_pos)
             nodes.extend(left_nodes)
             edges.extend(left_edges)
 
@@ -784,7 +785,7 @@ class SequenceTree:
         if node.right:
             # Right child starts at the end position of the current node
             right_abs_pos = abs_pos + left_length + node.length
-            right_nodes, right_edges = SequenceTree._build_graphviz_dot_nodes_edges(node.right, nesting_graph, right_abs_pos)
+            right_nodes, right_edges = SequenceTree._build_graphviz_dot_nodes_edges(node.right, event_journal, right_abs_pos)
             nodes.extend(right_nodes)
             edges.extend(right_edges)
 
