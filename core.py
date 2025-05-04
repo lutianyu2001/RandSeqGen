@@ -638,8 +638,8 @@ class SequenceTree:
         return '\n'.join(dot_str)
 
     @staticmethod
-    def _build_graphviz_dot_nodes_edges(node: SequenceNode, event_journal,
-                                       abs_pos: int = 0) -> tuple:
+    def _build_graphviz_dot_nodes_edges(node: SequenceNode, event_journal, 
+                                        abs_pos: int = 0, null_leaf: bool = False) -> tuple:
         """
         Recursively build nodes and edges for Graphviz visualization.
 
@@ -708,6 +708,12 @@ class SequenceTree:
         # Add the node to the nodes list
         nodes.append(f'{node_id} [label="{label}", fillcolor="{fill_color}"];')
 
+        def create_null_leaf(node_id: str, direction: str) -> tuple:
+            invisible_node_id = f"null_{direction}_{node.uid}"
+            node = f'{invisible_node_id} [label="NULL_LEAF", style="invis"];'
+            edge = f'{node_id} -> {invisible_node_id} [style="invis"];'
+            return node, edge
+
         # Process left child if exists
         if node.left:
             # Left child should start at the same absolute position as its parent
@@ -719,11 +725,11 @@ class SequenceTree:
             # Add edge from this node to left child using uid
             left_id = f"node_{node.left.uid}"
             edges.append(f'{node_id} -> {left_id} [label="L", color="blue"];')
-        elif node.right:
+        elif node.right and null_leaf:
             # If no left child but has right child, add invisible node for balance
-            invisible_left_id = f"null_left_{node.uid}"
-            nodes.append(f'{invisible_left_id} [label="NULL_L_LEAF", style="invis"];')
-            edges.append(f'{node_id} -> {invisible_left_id} [style="invis"];')
+            null_left_node, null_left_edge = create_null_leaf(node_id, "left")
+            nodes.append(null_left_node)
+            edges.append(null_left_edge)
 
         # Process right child if exists
         if node.right:
@@ -736,10 +742,16 @@ class SequenceTree:
             # Add edge from this node to right child using uid
             right_id = f"node_{node.right.uid}"
             edges.append(f'{node_id} -> {right_id} [label="R", color="red"];')
-        elif node.left:
+        elif node.left and null_leaf:
             # If no right child but has left child, add invisible node for balance
-            invisible_right_id = f"null_right_{node.uid}"
-            nodes.append(f'{invisible_right_id} [label="NULL_R_LEAF", style="invis"];')
-            edges.append(f'{node_id} -> {invisible_right_id} [style="invis"];')
+            null_right_node, null_right_edge = create_null_leaf(node_id, "right")
+            nodes.append(null_right_node)
+            edges.append(null_right_edge)
+
+        if not node.left and not node.right and null_leaf:
+            null_left_node, null_left_edge = create_null_leaf(node_id, "left")
+            null_right_node, null_right_edge = create_null_leaf(node_id, "right")
+            nodes.extend([null_left_node, null_right_node])
+            edges.extend([null_left_edge, null_right_edge])
 
         return nodes, edges
