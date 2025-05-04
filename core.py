@@ -719,6 +719,11 @@ class SequenceTree:
             # Add edge from this node to left child using uid
             left_id = f"node_{node.left.uid}"
             edges.append(f'{node_id} -> {left_id} [label="L", color="blue"];')
+        elif node.right:
+            # If no left child but has right child, add invisible node for balance
+            invisible_left_id = f"null_left_{node.uid}"
+            nodes.append(f'{invisible_left_id} [label="NULL_L_LEAF", style="invis"];')
+            edges.append(f'{node_id} -> {invisible_left_id} [style="invis"];')
 
         # Process right child if exists
         if node.right:
@@ -731,5 +736,10 @@ class SequenceTree:
             # Add edge from this node to right child using uid
             right_id = f"node_{node.right.uid}"
             edges.append(f'{node_id} -> {right_id} [label="R", color="red"];')
+        elif node.left:
+            # If no right child but has left child, add invisible node for balance
+            invisible_right_id = f"null_right_{node.uid}"
+            nodes.append(f'{invisible_right_id} [label="NULL_R_LEAF", style="invis"];')
+            edges.append(f'{node_id} -> {invisible_right_id} [style="invis"];')
 
         return nodes, edges

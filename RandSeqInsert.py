@@ -392,8 +392,8 @@ class SeqGenerator:
             # Generate nesting graph visualization
             graph_visual_dir_path = os.path.join(self.output_dir_path, VISUAL_DIR_NAME)
             os.makedirs(graph_visual_dir_path, exist_ok=True)
-            nesting_graphviz_str = seq_tree.nesting_graph.to_graphviz_dot()
-            with open(os.path.join(graph_visual_dir_path, f"{seq_record.id}_graph_visual.dot"), "w") as f:
+            nesting_graphviz_str = seq_tree.event_journal.to_graphviz_dot()
+            with open(os.path.join(graph_visual_dir_path, f"{seq_record.id}_event_visual.dot"), "w") as f:
                 f.write(nesting_graphviz_str)
 
             print(f"Generated tree and graph visualizations for {seq_record.id}")
@@ -401,7 +401,7 @@ class SeqGenerator:
         # 如果启用debug模式，打印嵌套关系图的详细信息
         if self.flag_debug:
             print(f"\n[DEBUG] 嵌套关系图信息 for {seq_record.id}:")
-            print(str(seq_tree.nesting_graph))
+            print(str(seq_tree.event_journal))
             print("[DEBUG] 嵌套关系图信息结束\n")
 
         return new_seq_record, all_used_donors, all_reconstructed_donors
