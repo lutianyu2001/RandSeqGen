@@ -220,12 +220,16 @@ class SequenceTree:
         self.next_uid += 1
         return uid
 
-    def _release_uid(self, uid: int, reuse: bool = False):
+    def _release_uid(self, uid: int):
         """Release an UID back to the UID management system"""
-        if uid in self.node_dict:
-            del self.node_dict[uid]
 
-        if reuse and uid not in self.available_uids:
+        # TODO This part should only be used in remove node (future work)
+        # if uid in self.node_dict:
+        #     del self.node_dict[uid]
+
+        if self.next_uid == uid + 1:
+            self.next_uid -= 1
+        elif uid not in self.available_uids:
             self.available_uids.append(uid)
 
     def _create_node(self, data: str, is_donor: bool = False, donor_id: str = None, uid: int = None) -> SequenceNode:
@@ -384,7 +388,7 @@ class SequenceTree:
                     )
 
                 # Release old node UID (Do not reuse it)
-                self._release_uid(old_node_uid)
+                # self._release_uid(old_node_uid)
 
                 # Update node information
                 current.data = donor_seq
@@ -551,7 +555,7 @@ class SequenceTree:
                 )
 
             # Release old node UID (Do not reuse it)
-            self._release_uid(old_node_uid)
+            # self._release_uid(old_node_uid)
 
             # Update node information
             node.data = donor_seq
