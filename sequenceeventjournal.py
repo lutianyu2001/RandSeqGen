@@ -566,12 +566,12 @@ class SequenceEventJournal:
             
             # Add relationship edges
             # Donor to event
-            dot_str.append(f'  node_{event.donor_uid} -> event_{event.event_id} [label="donor", color="blue"];')
+            dot_str.append(f'  node_{event.donor_uid} -> event_{event.event_id} [dir="none", label="donor", color="purple"];')
             # Event to target
-            dot_str.append(f'  event_{event.event_id} -> node_{event.target_uid} [label="target", color="red"];')
+            dot_str.append(f'  event_{event.event_id} -> node_{event.target_uid} [label="insert", color="green"];')
             # Target to left/right fragments
-            dot_str.append(f'  node_{event.target_uid} -> node_{event.left_uid} [label="left", style="dashed", color="darkgreen"];')
-            dot_str.append(f'  node_{event.target_uid} -> node_{event.right_uid} [label="right", style="dashed", color="darkgreen"];')
+            dot_str.append(f'  node_{event.target_uid} -> node_{event.left_uid} [label="L", style="dashed", color="blue"];')
+            dot_str.append(f'  node_{event.target_uid} -> node_{event.right_uid} [label="R", style="dashed", color="red"];')
         
         dot_str.append('}')
         return '\n'.join(dot_str)
