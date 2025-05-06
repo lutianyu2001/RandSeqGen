@@ -336,6 +336,7 @@ class SequenceEventJournal:
     def _reconstruct_target(self, target_uid: int, target_events: List[InsertionEvent], seq_id: str) -> Dict[str, Any]:
         """
         Reconstruct a target node (node that was inserted into).
+        TSD is not included in the reconstruction.
 
         Args:
             target_uid: Target node UID
@@ -365,16 +366,8 @@ class SequenceEventJournal:
             left_seq = self._get_node_sequence(event.left_uid)
             right_seq = self._get_node_sequence(event.right_uid)
             
-            # Apply TSD if present
-            if event.tsd_info:
-                tsd_5 = event.tsd_info.get('tsd_5', '')
-                tsd_3 = event.tsd_info.get('tsd_3', '')
-                donor_with_tsd = tsd_5 + donor_full_seq + tsd_3
-            else:
-                donor_with_tsd = donor_full_seq
-            
             # Update full reconstruction (with nesting)
-            full_seq = left_seq + donor_with_tsd + right_seq
+            full_seq = left_seq + donor_full_seq + right_seq
             
             # Update clean reconstruction (without nesting)
             clean_seq = left_seq + right_seq
@@ -408,12 +401,13 @@ class SequenceEventJournal:
     def reconstruct_donors_to_records(self, seq_id: str) -> List[SeqRecord]:
         """
         Reconstruct nested sequences and create SeqRecord objects.
+        Removes TSD sequences from reconstructed donor records as they are not needed.
 
         Args:
             seq_id: Sequence identifier
 
         Returns:
-            List[SeqRecord]: List of reconstructed records
+            List[SeqRecord]: List of reconstructed records without TSD sequences
         """
         reconstructed_records = []
         
@@ -426,15 +420,37 @@ class SequenceEventJournal:
             if not reconstruct_result:
                 continue
             
-            # Create full reconstruction record
+            # Find TSD information for this donor
+            tsd_5 = ""
+            tsd_3 = ""
+            for event in self.events:
+                if event.donor_uid == uid and event.tsd_info:
+                    tsd_info = event.tsd_info
+                    tsd_5 = tsd_info.get('tsd_5', '')
+                    tsd_3 = tsd_info.get('tsd_3', '')
+                    break
+            
+            # Remove TSD from full reconstruction
             full_seq = reconstruct_result['full']
+            if tsd_5 and full_seq.startswith(tsd_5):
+                full_seq = full_seq[len(tsd_5):]
+            if tsd_3 and full_seq.endswith(tsd_3):
+                full_seq = full_seq[:-len(tsd_3)]
+            
+            # Create full reconstruction record with TSD removed
             full_id = f"{seq_id}_reconstructed_{uid}"
             full_rec = create_sequence_record(full_seq, full_id)
             full_rec.annotations["reconstruction_type"] = "full"
             full_rec.annotations["original_uid"] = uid
             
-            # Create clean reconstruction record
+            # Remove TSD from clean reconstruction
             clean_seq = reconstruct_result['clean']
+            if tsd_5 and clean_seq.startswith(tsd_5):
+                clean_seq = clean_seq[len(tsd_5):]
+            if tsd_3 and clean_seq.endswith(tsd_3):
+                clean_seq = clean_seq[:-len(tsd_3)]
+            
+            # Create clean reconstruction record with TSD removed
             clean_id = f"{seq_id}_clean_reconstructed_{uid}"
             clean_rec = create_sequence_record(clean_seq, clean_id)
             clean_rec.annotations["reconstruction_type"] = "clean"
@@ -449,12 +465,13 @@ class SequenceEventJournal:
     def collect_donor_records(self, seq_id: str) -> List[SeqRecord]:
         """
         Collect donor records from the tree.
+        Removes TSD sequences from donor records as they are not needed.
 
         Args:
             seq_id: Sequence identifier
 
         Returns:
-            List[SeqRecord]: Donor record list
+            List[SeqRecord]: Donor record list without TSD sequences
         """
         donor_records = []
         abs_position_map = self._calculate_absolute_positions()
@@ -470,16 +487,43 @@ class SequenceEventJournal:
                 start_pos_1based = start_pos + 1
                 end_pos_1based = end_pos
                 
-                # Create donor ID
-                donor_id = f"{seq_id}_{start_pos_1based}_{end_pos_1based}-+-{node.length}"
+                # Get donor sequence and check for TSD
+                donor_seq = node.data
+                donor_length = node.length
+                
+                # Find insertion events where this node is the donor
+                for event in self.events:
+                    if event.donor_uid == uid and event.tsd_info:
+                        # Extract TSD information
+                        tsd_info = event.tsd_info
+                        tsd_5 = tsd_info.get('tsd_5', '')
+                        tsd_3 = tsd_info.get('tsd_3', '')
+                        
+                        # Remove TSD sequences from donor
+                        if tsd_5 and donor_seq.startswith(tsd_5):
+                            donor_seq = donor_seq[len(tsd_5):]
+                            donor_length -= len(tsd_5)
+                            # Adjust position to account for removed 5' TSD
+                            start_pos_1based += len(tsd_5)
+                        
+                        if tsd_3 and donor_seq.endswith(tsd_3):
+                            donor_seq = donor_seq[:-len(tsd_3)]
+                            donor_length -= len(tsd_3)
+                            # End position is automatically adjusted by new length
+                        
+                        # We found the event with this donor, no need to continue
+                        break
+                
+                # Create donor ID - now reflects sequence without TSD
+                donor_id = f"{seq_id}_{start_pos_1based}_{start_pos_1based + donor_length - 1}-+-{donor_length}"
                 if node.donor_id:
                     donor_id += f"-{node.donor_id}"
                 
-                # Create record
-                donor_record = create_sequence_record(node.data, donor_id)
+                # Create record with TSD-free sequence
+                donor_record = create_sequence_record(donor_seq, donor_id)
                 donor_record.annotations["uid"] = uid
                 donor_record.annotations["position"] = start_pos_1based
-                donor_record.annotations["length"] = node.length
+                donor_record.annotations["length"] = donor_length
                 
                 # Add to result list
                 donor_records.append(donor_record)
