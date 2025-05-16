@@ -586,27 +586,104 @@ class SequenceTree:
 
         raise RuntimeError("[ERROR] Should not reach here")
 
+    def collect_active_nodes(self) -> List[SequenceNode]:
+        """
+        Perform an in-order traversal of the tree to collect all active nodes in the final sequence.
+        This ensures we only consider nodes that are actually part of the final sequence,
+        not those that might have been created but later replaced or discarded.
+
+        Returns:
+            List[SequenceNode]: List of all active nodes in the tree, in in-order traversal order
+        """
+        active_nodes = []
+        
+        def _inorder_traverse(node):
+            if not node:
+                return
+            _inorder_traverse(node.left)
+            active_nodes.append(node)
+            _inorder_traverse(node.right)
+            
+        _inorder_traverse(self.root)
+        return active_nodes
+
     def donors(self, seq_id: str) -> Tuple[List[SeqRecord], List[SeqRecord]]:
         """
         Collect all donor nodes and reconstruct nested donors.
-        Uses event journal for efficient reconstruction.
+        Uses in-order traversal to collect only active nodes in the final sequence,
+        and uses event journal for efficient reconstruction.
 
         Args:
             seq_id (str): Original sequence ID
 
         Returns:
             Tuple[List[SeqRecord], List[SeqRecord]]:
-                - Regular donor records (excluding those covered by reconstructed donors)
+                - Regular donor records (only those without nested insertions)
                 - Reconstructed donor records
         """
-        # Collect all donor nodes
-        donor_records = self.event_journal.collect_donor_records(seq_id)
+        # Get active nodes via in-order traversal
+        active_nodes = self.collect_active_nodes()
         
-        # Reconstruct nested sequences using event journal
-        reconstructed_records = self.event_journal.reconstruct_donors_to_records(seq_id)
+        # Collect donor records from active nodes
+        donor_records = []
+        abs_position_map = self.event_journal._calculate_absolute_positions()
         
-        # Filter out donors that are covered by reconstructed donors
-        excluded_uids = self.event_journal.get_reconstructed_donor_uids()
+        for node in active_nodes:
+            if node.is_donor:
+                # Get absolute position information
+                start_pos = abs_position_map.get(node.uid, 0)
+                
+                # Convert to 1-based index for output
+                start_pos_1based = start_pos + 1
+                
+                # Get donor sequence and check for TSD
+                donor_seq = node.data
+                donor_length = node.length
+                
+                # Find insertion events where this node is the donor
+                for event in self.event_journal.events:
+                    if event.donor_uid == node.uid and event.tsd_info:
+                        # Extract TSD information
+                        tsd_info = event.tsd_info
+                        tsd_5 = tsd_info.get('tsd_5', '')
+                        tsd_3 = tsd_info.get('tsd_3', '')
+                        
+                        # Remove TSD sequences from donor
+                        if tsd_5 and donor_seq.startswith(tsd_5):
+                            donor_seq = donor_seq[len(tsd_5):]
+                            donor_length -= len(tsd_5)
+                            # Adjust position to account for removed 5' TSD
+                            start_pos_1based += len(tsd_5)
+                        
+                        if tsd_3 and donor_seq.endswith(tsd_3):
+                            donor_seq = donor_seq[:-len(tsd_3)]
+                            donor_length -= len(tsd_3)
+                        
+                        # We found the event with this donor, no need to continue
+                        break
+                
+                # Create donor ID - now reflects sequence without TSD
+                donor_id = f"{seq_id}_{start_pos_1based}_{start_pos_1based + donor_length - 1}-+-{donor_length}"
+                if node.donor_id:
+                    donor_id += f"-{node.donor_id}"
+                
+                # Create record with TSD-free sequence
+                donor_record = create_sequence_record(donor_seq, donor_id)
+                donor_record.annotations["uid"] = node.uid
+                donor_record.annotations["position"] = start_pos_1based
+                donor_record.annotations["length"] = donor_length
+                
+                # Add to result list
+                donor_records.append(donor_record)
+        
+        # Reconstruct nested sequences using event journal, passing active_nodes
+        reconstructed_records = self.event_journal.reconstruct_donors_to_records(seq_id, active_nodes)
+        
+        # Get the UIDs of donors that have been targets of insertion events (have nested insertions)
+        # Pass active_nodes to ensure consistency
+        excluded_uids = self.event_journal.get_reconstructed_donor_uids(active_nodes)
+        
+        # Filter donor_records to only include those that don't have nested insertions
         if excluded_uids:
             donor_records = [record for record in donor_records
                             if record.annotations.get("uid") not in excluded_uids]

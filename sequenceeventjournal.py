@@ -381,10 +381,14 @@ class SequenceEventJournal:
             'events': event_seqs
         }
 
-    def get_reconstructed_donor_uids(self) -> Set[int]:
+    def get_reconstructed_donor_uids(self, active_nodes: List = None) -> Set[int]:
         """
-        Get all donor UIDs that need reconstruction.
+        Get all donor UIDs that need reconstruction from active nodes.
         These are donors that have been split by other donors.
+
+        Args:
+            active_nodes: Optional list of active nodes from in-order traversal.
+                          If provided, only considers donors from these nodes.
 
         Returns:
             Set[int]: Set of UIDs of donors to reconstruct
@@ -393,18 +397,34 @@ class SequenceEventJournal:
         
         for event in self.events:
             # If a node is a target and it's a donor (not the root node)
-            if event.target_uid != self.tree_ref.root.uid and self.is_donor(event.target_uid):
-                reconstructed_uids.add(event.target_uid)
+            if event.target_uid != self.tree_ref.root.uid:
+                # Check if this target is a donor
+                is_donor = False
+                
+                # If active nodes are provided, check if the target is in active nodes and is a donor
+                if active_nodes is not None:
+                    for node in active_nodes:
+                        if node.uid == event.target_uid and node.is_donor:
+                            is_donor = True
+                            break
+                # Otherwise use general is_donor check
+                else:
+                    is_donor = self.is_donor(event.target_uid)
+                
+                if is_donor:
+                    reconstructed_uids.add(event.target_uid)
         
         return reconstructed_uids
 
-    def reconstruct_donors_to_records(self, seq_id: str) -> List[SeqRecord]:
+    def reconstruct_donors_to_records(self, seq_id: str, active_nodes: List = None) -> List[SeqRecord]:
         """
         Reconstruct nested sequences and create SeqRecord objects.
         Removes TSD sequences from reconstructed donor records as they are not needed.
 
         Args:
             seq_id: Sequence identifier
+            active_nodes: Optional list of active nodes from in-order traversal.
+                          If provided, only considers donors from these nodes.
 
         Returns:
             List[SeqRecord]: List of reconstructed records without TSD sequences
@@ -412,7 +432,7 @@ class SequenceEventJournal:
         reconstructed_records = []
         
         # Get all donors that need reconstruction
-        reconstructed_uids = self.get_reconstructed_donor_uids()
+        reconstructed_uids = self.get_reconstructed_donor_uids(active_nodes)
         
         for uid in reconstructed_uids:
             # Reconstruct sequence
@@ -462,13 +482,15 @@ class SequenceEventJournal:
         
         return reconstructed_records
 
-    def collect_donor_records(self, seq_id: str) -> List[SeqRecord]:
+    def collect_donor_records(self, seq_id: str, active_nodes: List = None) -> List[SeqRecord]:
         """
-        Collect donor records from the tree.
+        Collect donor records from active nodes in the tree.
         Removes TSD sequences from donor records as they are not needed.
 
         Args:
             seq_id: Sequence identifier
+            active_nodes: Optional list of active nodes from in-order traversal.
+                          If None, falls back to using all nodes in node_dict.
 
         Returns:
             List[SeqRecord]: Donor record list without TSD sequences
@@ -476,11 +498,14 @@ class SequenceEventJournal:
         donor_records = []
         abs_position_map = self._calculate_absolute_positions()
         
-        # Iterate through all nodes, find donors
-        for uid, node in self.tree_ref.node_dict.items():
+        # Use provided active nodes if available, otherwise fall back to checking all nodes
+        nodes_to_check = active_nodes if active_nodes is not None else self.tree_ref.node_dict.values()
+        
+        # Iterate through nodes and find donors
+        for node in nodes_to_check:
             if node.is_donor:
                 # Get absolute position information
-                start_pos = abs_position_map.get(uid, 0)
+                start_pos = abs_position_map.get(node.uid, 0)
                 end_pos = start_pos + node.length
                 
                 # Convert to 1-based index for output
@@ -493,7 +518,7 @@ class SequenceEventJournal:
                 
                 # Find insertion events where this node is the donor
                 for event in self.events:
-                    if event.donor_uid == uid and event.tsd_info:
+                    if event.donor_uid == node.uid and event.tsd_info:
                         # Extract TSD information
                         tsd_info = event.tsd_info
                         tsd_5 = tsd_info.get('tsd_5', '')
@@ -521,7 +546,7 @@ class SequenceEventJournal:
                 
                 # Create record with TSD-free sequence
                 donor_record = create_sequence_record(donor_seq, donor_id)
-                donor_record.annotations["uid"] = uid
+                donor_record.annotations["uid"] = node.uid
                 donor_record.annotations["position"] = start_pos_1based
                 donor_record.annotations["length"] = donor_length
                 
