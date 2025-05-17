@@ -539,6 +539,10 @@ class SequenceEventJournal:
                         # We found the event with this donor, no need to continue
                         break
                 
+                # Skip donors with zero length after TSD removal
+                if donor_length <= 0:
+                    continue
+                    
                 # Create donor ID - now reflects sequence without TSD
                 donor_id = f"{seq_id}_{start_pos_1based}_{start_pos_1based + donor_length - 1}-+-{donor_length}"
                 if node.donor_id:
