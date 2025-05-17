@@ -767,11 +767,11 @@ class SequenceTree:
         # Process fragment and nesting information
         cut_half = ""
 
-        # 重新设计颜色赋值逻辑，使其更加明确
-        # 1. 先设置基础颜色（donor为蓝色，acceptor为绿色）
-        # 2. 如果是切割片段，改为粉色
-        # 3. 如果有嵌套关系，改为黄色
-        # 4. 如果同时满足2和3，则为紫色
+        # Redesigned color assignment logic for clarity:
+        # 1. First set base colors (donor = blue, acceptor = green)
+        # 2. If it's a cut fragment, change to pink
+        # 3. If it has nesting relationship, change to yellow
+        # 4. If conditions 2 and 3 are both true, use purple
 
         # Check if this is a fragment of a cut donor
         if event_journal.is_fragment(node.uid):

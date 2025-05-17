@@ -7,77 +7,78 @@ from core import SequenceTree
 
 def test_multiple_cuts():
     """
-    测试多重切割情况下的重建算法
-    创建一个被多个供体切割的情景，然后执行重建，验证所有切割关系是否都被正确处理。
+    Test reconstruction algorithm for multiple cutting scenarios
+    Create a scenario where multiple donors cut a sequence, then perform reconstruction 
+    and verify that all cutting relationships are properly processed.
     Returns:
-        tuple: (重建的donor记录列表, 是否成功)
+        tuple: (List of reconstructed donor records, success status)
     """
-    # 初始化树数据结构
-    tree = SequenceTree("ATGCATGCATGCATGCATGCATGCATGCATGCATGC")  # 原始序列
+    # Initialize tree data structure
+    tree = SequenceTree("ATGCATGCATGCATGCATGCATGCATGCATGCATGC")  # Original sequence
 
-    # 创建一个被多次切割的简单情景
-    # 原始序列被三个不同的donor切割：
-    # - donor 1 切割在位置10
-    # - donor 2 切割在位置20
-    # - donor 3 切割在位置30
-    # 使用真实DNA序列
+    # Create a simple scenario with multiple cuts
+    # The original sequence is cut by three different donors:
+    # - donor 1 cuts at position 10
+    # - donor 2 cuts at position 20
+    # - donor 3 cuts at position 30
+    # Using real DNA sequences
     first_cutter = "GTACGTAC"
     second_cutter = "CCGGAATT"
     third_cutter = "TTAGGCCA"
     
-    # 插入donor序列在相应位置
+    # Insert donor sequences at respective positions
     tree.insert(10, first_cutter, "cutter1")
     tree.insert(20, second_cutter, "cutter2")
     tree.insert(30, third_cutter, "cutter3")
     
-    # 重建供体
+    # Reconstruct donors
     _, reconstructed_records = tree.donors("test")
     
-    # 定义预期结果 - 明确基于SequenceTree的预期行为
+    # Define expected results - explicitly based on expected behavior of SequenceTree
     expected_results = {
-        "clean_recon_count": 3,  # 期望有3个清洁重建（每个切割点一个）
-        "full_recon_count": 3,   # 期望有3个完整重建（每个切割者一个）
+        "clean_recon_count": 3,  # Expect 3 clean reconstructions (one for each cut point)
+        "full_recon_count": 3,   # Expect 3 full reconstructions (one for each cutter)
         "expected_cutters": [first_cutter, second_cutter, third_cutter],
-        "min_cutter_matches": 2  # 至少有2个切割者应该在完整重建中找到
+        "min_cutter_matches": 2  # At least 2 cutters should be found in full reconstructions
     }
     
-    # 验证正确性
+    # Verify correctness
     success = True
     error_messages = []
     
-    # 检查清洁重建数量
+    # Check clean reconstruction count
     clean_recon = [rec for rec in reconstructed_records if rec.annotations.get("reconstruction_type") == "clean"]
     if len(clean_recon) != expected_results["clean_recon_count"]:
-        error_messages.append(f"错误: 应该有{expected_results['clean_recon_count']}个清洁重建，但实际有{len(clean_recon)}个")
+        error_messages.append(f"Error: Should have {expected_results['clean_recon_count']} clean reconstructions, but actually have {len(clean_recon)}")
         success = False
     
-    # 检查完整重建数量
+    # Check full reconstruction count
     full_recon = [rec for rec in reconstructed_records if rec.annotations.get("reconstruction_type") == "full"]
     if len(full_recon) != expected_results["full_recon_count"]:
-        error_messages.append(f"错误: 应该有{expected_results['full_recon_count']}个完整重建，但实际有{len(full_recon)}个")
+        error_messages.append(f"Error: Should have {expected_results['full_recon_count']} full reconstructions, but actually have {len(full_recon)}")
         success = False
     
-    # 验证完整重建序列内容 - 检查是否包含切割者序列
+    # Validate full reconstruction sequence content - check if it contains cutter sequences
     found_cutters = []
     for cutter in expected_results["expected_cutters"]:
         found = False
         for rec in full_recon:
             seq_str = str(rec.seq)
-            # 检查完整或部分序列
+            # Check complete or partial sequence
             if cutter in seq_str or cutter[:4] in seq_str:
                 found = True
                 found_cutters.append(cutter)
                 break
     
     if len(found_cutters) < expected_results["min_cutter_matches"]:
-        error_messages.append(f"错误: 至少应该找到{expected_results['min_cutter_matches']}个切割者的序列，但只找到了{len(found_cutters)}个")
+        error_messages.append(f"Error: Should find at least {expected_results['min_cutter_matches']} cutter sequences, but only found {len(found_cutters)}")
         success = False
     
-    # 打印测试结果
+    # Print test results
     if success:
-        print("多重切割测试成功！所有切割关系都被正确处理。")
+        print("Multiple cutting test successful! All cutting relationships were correctly processed.")
     else:
-        print("多重切割测试失败！请检查重建算法。")
+        print("Multiple cutting test failed! Please check the reconstruction algorithm.")
         for error in error_messages:
             print(f"  {error}")
     
@@ -86,152 +87,153 @@ def test_multiple_cuts():
 
 def test_comprehensive_nesting():
     """
-    全面测试多种复杂嵌套和切割情景，验证重建算法的正确性。
-    测试包含多种场景:
-    - 单个插入
-    - 相邻位置插入
-    - 嵌套插入
-    - 多重嵌套
-    - 切割donor
-    - 多重切割
-    - 连锁切割
-    - 边界切割
-    - 随机多donor复杂网络
-    - 空序列处理
-    - 极端长短序列
-    - 完全重叠切割
+    Comprehensive test of various complex nesting and cutting scenarios to verify 
+    the correctness of the reconstruction algorithm.
+    Tests include multiple scenarios:
+    - Single insertion
+    - Adjacent position insertions
+    - Nested insertions
+    - Multiple nesting
+    - Cutting donors
+    - Multiple cuts
+    - Chain cutting
+    - Boundary cutting
+    - Random multi-donor complex networks
+    - Empty sequence handling
+    - Extreme length sequences
+    - Completely overlapping cuts
     Returns:
-        bool: 测试是否全部通过
+        bool: Whether all tests passed
     """
     test_results = []
     
-    # ======== 场景1: 单个donor插入 ========
-    print("\n===== 测试场景1: 单个donor插入 =====")
-    # 创建初始序列
+    # ======== Scenario 1: Single donor insertion ========
+    print("\n===== Testing Scenario 1: Single donor insertion =====")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 插入donor
+    # Insert donor
     tree.insert(2, "TTT", "donor1")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "total_reconstructions": 2,         # 预期总共有2个重建
-        "clean_reconstructions": 1,         # 预期有1个清洁重建
-        "full_reconstructions": 1,          # 预期有1个完整重建
-        "donor_sequence_present": "TTT"     # 预期重建中包含此序列
+        "total_reconstructions": 2,         # Expected total of 2 reconstructions
+        "clean_reconstructions": 1,         # Expected 1 clean reconstruction
+        "full_reconstructions": 1,          # Expected 1 full reconstruction
+        "donor_sequence_present": "TTT"     # Expected this sequence to be in reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
-    # 检查重建总数
+    # Check total reconstruction count
     if reconstructed is None or len(reconstructed) != expected["total_reconstructions"]:
         success = False
-        reason = f"期望{expected['total_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected {expected['total_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
-        # 检查清洁重建数量
+        # Check clean reconstruction count
         clean_count = len([r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"])
         if clean_count != expected["clean_reconstructions"]:
             success = False
-            reason = f"期望{expected['clean_reconstructions']}个清洁重建，但得到了{clean_count}个"
+            reason = f"Expected {expected['clean_reconstructions']} clean reconstructions, but got {clean_count}"
         
-        # 检查完整重建数量
+        # Check full reconstruction count
         full_count = len([r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"])
         if full_count != expected["full_reconstructions"]:
             success = False
-            reason = f"期望{expected['full_reconstructions']}个完整重建，但得到了{full_count}个"
+            reason = f"Expected {expected['full_reconstructions']} full reconstructions, but got {full_count}"
         
-        # 检查序列内容
+        # Check sequence content
         if not any(expected["donor_sequence_present"] in str(r.seq) for r in reconstructed):
             success = False
-            reason = f"在重建中未找到预期序列 {expected['donor_sequence_present']}"
+            reason = f"Expected sequence {expected['donor_sequence_present']} not found in reconstructions"
     
-    # 记录测试结果
-    test_results.append(("场景1", success, reason if not success else "单个donor插入，创建了预期的重建"))
+    # Record test results
+    test_results.append(("Scenario 1", success, reason if not success else "Single donor insertion, created expected reconstructions"))
     if success:
-        print("✓ 场景1测试通过: 单个donor插入，创建了预期的重建")
+        print("✓ Scenario 1 test passed: Single donor insertion, created expected reconstructions")
     else:
-        print(f"✗ 场景1测试失败: {reason}")
+        print(f"✗ Scenario 1 test failed: {reason}")
     
-    # ======== 场景2: 相邻位置双重插入 ========
-    print("\n===== 测试场景2: 相邻位置双重插入 =====")
-    # 创建初始序列
+    # ======== Scenario 2: Adjacent double insertion ========
+    print("\n===== Testing Scenario 2: Adjacent double insertion =====")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 插入donor1
+    # Insert donor1
     tree.insert(2, "TTT", "donor1")
-    # 插入donor2(相邻位置)
+    # Insert donor2 (adjacent position)
     tree.insert(5, "GGG", "donor2")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "total_reconstructions": 2,  # 预期总共有2个重建
-        "donor_sequences": ["TTT", "GGG"]  # 预期包含这两个序列
+        "total_reconstructions": 2,  # Expected total of 2 reconstructions
+        "donor_sequences": ["TTT", "GGG"]  # Expected to contain these two sequences
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) != expected["total_reconstructions"]:
         success = False
-        reason = f"期望{expected['total_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected {expected['total_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
-        # 检查序列内容
+        # Check sequence content
         for donor_seq in expected["donor_sequences"]:
             if not any(donor_seq in str(r.seq) for r in reconstructed):
                 success = False
-                reason = f"在重建中未找到预期序列 {donor_seq}"
+                reason = f"Expected sequence {donor_seq} not found in reconstructions"
                 break
     
-    # 记录测试结果
-    test_results.append(("场景2", success, reason if not success else "相邻位置donors，创建了预期的重建"))
+    # Record test results
+    test_results.append(("Scenario 2", success, reason if not success else "Adjacent donors, created expected reconstructions"))
     if success:
-        print("✓ 场景2测试通过: 相邻位置donors，创建了预期的重建")
+        print("✓ Scenario 2 test passed: Adjacent donors, created expected reconstructions")
     else:
-        print(f"✗ 场景2测试失败: {reason}")
+        print(f"✗ Scenario 2 test failed: {reason}")
     
-    # ======== 场景3: 嵌套插入 ========
-    print("\n===== 测试场景3: 嵌套插入 =====")
-    # 创建初始序列
+    # ======== Scenario 3: Nested insertion ========
+    print("\n===== Testing Scenario 3: Nested insertion =====")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 插入donor1
+    # Insert donor1
     tree.insert(2, "TTTAAA", "donor1")
-    # 插入donor2(在donor1内部)
+    # Insert donor2(in donor1)
     tree.insert(5, "GGG", "donor2")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 2,  # 期望至少有2个重建
-        "min_full_reconstructions": 1,  # 期望至少有1个完整重建
-        "should_contain_nested": True,  # 期望至少有一个重建包含嵌套序列
+        "min_reconstructions": 2,  # Expected at least 2 reconstructions
+        "min_full_reconstructions": 1,  # Expected at least 1 full reconstruction
+        "should_contain_nested": True,  # Expected at least one reconstruction to contain nested sequence
         "outer_donor": "TTTAAA",
         "inner_donor": "GGG"
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
-        # 检查完整重建数量
+        # Check full reconstruction count
         full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
         if len(full_recon) < expected["min_full_reconstructions"]:
             success = False
-            reason = f"期望至少{expected['min_full_reconstructions']}个完整重建，但得到了{len(full_recon)}个"
+            reason = f"Expected at least {expected['min_full_reconstructions']} full reconstructions, but got {len(full_recon)}"
         else:
-            # 检查嵌套序列
+            # Check nested sequence
             found_nested = False
             for rec in full_recon:
                 seq_str = str(rec.seq)
@@ -242,48 +244,48 @@ def test_comprehensive_nesting():
             
             if expected["should_contain_nested"] and not found_nested:
                 success = False
-                reason = "未找到包含预期嵌套序列的重建"
+                reason = "No reconstruction containing expected nested sequence found"
     
-    # 记录测试结果
-    test_results.append(("场景3", success, reason if not success else "嵌套插入重建正确"))
+    # Record test results
+    test_results.append(("Scenario 3", success, reason if not success else "Nested insertion reconstruction correct"))
     if success:
-        print("✓ 场景3测试通过: 嵌套插入重建正确")
+        print("✓ Scenario 3 test passed: Nested insertion reconstruction correct")
     else:
-        print(f"✗ 场景3测试失败: {reason}")
+        print(f"✗ Scenario 3 test failed: {reason}")
         
-    # ======== 场景4: 多重嵌套插入 ========
-    print("\n===== 测试场景4: 多重嵌套插入 =====")
-    # 创建初始序列
+    # ======== Scenario 4: Multiple nesting insertion ========
+    print("\n===== Testing Scenario 4: Multiple nesting insertion =====")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 插入donor1
+    # Insert donor1
     tree.insert(2, "TTTAAA", "donor1")
-    # 插入donor2(在donor1内部)
+    # Insert donor2(in donor1)
     tree.insert(5, "GGCCC", "donor2")
-    # 插入donor3(在donor2内部)
+    # Insert donor3(in donor2)
     tree.insert(7, "AAA", "donor3")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 2,  # 期望至少有2个重建
-        "min_nested_sequences": 2,  # 期望至少发现2层嵌套
-        "donor_sequences": ["TTTAAA", "GGCCC", "AAA"]  # 可能出现的donor序列
+        "min_reconstructions": 2,  # Expected at least 2 reconstructions
+        "min_nested_sequences": 2,  # Expected at least 2 layers of nesting
+        "donor_sequences": ["TTTAAA", "GGCCC", "AAA"]  # Possible donor sequences
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
-        # 获取所有完整重建
+        # Get all full reconstructions
         full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
         
-        # 检查是否至少有一个重建包含多层嵌套
+        # Check if at least one reconstruction contains multiple layers of nesting
         max_nested_count = 0
         for rec in full_recon:
             seq_str = str(rec.seq)
@@ -295,110 +297,110 @@ def test_comprehensive_nesting():
         
         if max_nested_count < expected["min_nested_sequences"]:
             success = False
-            reason = f"期望找到至少{expected['min_nested_sequences']}层嵌套，但最多只找到{max_nested_count}层"
+            reason = f"Expected to find at least {expected['min_nested_sequences']} layers of nesting, but found {max_nested_count} layers"
     
-    # 记录测试结果
-    test_results.append(("场景4", success, reason if not success else "多重嵌套插入重建正确"))
+    # Record test results
+    test_results.append(("Scenario 4", success, reason if not success else "Multiple nesting insertion reconstruction correct"))
     if success:
-        print("✓ 场景4测试通过: 多重嵌套插入重建正确")
+        print("✓ Scenario 4 test passed: Multiple nesting insertion reconstruction correct")
     else:
-        print(f"✗ 场景4测试失败: {reason}")
+        print(f"✗ Scenario 4 test failed: {reason}")
     
-    # ======== 场景5: 切割donor ========
-    print("\n===== 测试场景5: 切割donor ========")
-    # 创建初始序列
+    # ======== Scenario 5: Cutting donor ========
+    print("\n===== Testing Scenario 5: Cutting donor ========")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 插入donor1
+    # Insert donor1
     tree.insert(2, "TTAAA", "donor1")
-    # 插入donor2(切断donor1)
+    # Insert donor2(cut off donor1)
     tree.insert(4, "GGG", "donor2")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 2,  # 期望至少有2个重建
-        "has_clean_reconstructions": True,  # 期望有清洁重建
-        "has_full_reconstructions": True,  # 期望有完整重建
-        "cutter_sequence": "GGG"  # 期望在完整重建中找到切割者序列
+        "min_reconstructions": 2,  # Expected at least 2 reconstructions
+        "has_clean_reconstructions": True,  # Expected clean reconstruction
+        "has_full_reconstructions": True,  # Expected full reconstruction
+        "cutter_sequence": "GGG"  # Expected to find cutter sequence in full reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
-        # 验证完整重建和清洁重建
+        # Verify full and clean reconstruction
         clean_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"]
         full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
         
         if expected["has_clean_reconstructions"] and not clean_recon:
             success = False
-            reason = "缺少清洁重建"
+            reason = "Missing clean reconstruction"
         elif expected["has_full_reconstructions"] and not full_recon:
             success = False
-            reason = "缺少完整重建"
+            reason = "Missing full reconstruction"
         else:
-            # 检查是否有至少一个完整重建包含donor2
+            # Check if at least one full reconstruction contains donor2
             has_donor2 = any(expected["cutter_sequence"] in str(r.seq) for r in full_recon)
             
             if not has_donor2:
                 success = False
-                reason = f"未找到包含{expected['cutter_sequence']}的完整重建"
+                reason = f"No full reconstruction containing {expected['cutter_sequence']}"
     
-    # 记录测试结果
-    test_results.append(("场景5", success, reason if not success else "切割donor重建正确"))
+    # Record test results
+    test_results.append(("Scenario 5", success, reason if not success else "Cutting donor reconstruction correct"))
     if success:
-        print("✓ 场景5测试通过: 切割donor重建正确")
+        print("✓ Scenario 5 test passed: Cutting donor reconstruction correct")
     else:
-        print(f"✗ 场景5测试失败: {reason}")
+        print(f"✗ Scenario 5 test failed: {reason}")
     
-    # ======== 场景6: 多重切割 ========
-    print("\n===== 测试场景6: 多重切割 =====")
-    # 创建初始序列
+    # ======== Scenario 6: Multiple cuts ========
+    print("\n===== Testing Scenario 6: Multiple cuts =====")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 插入donor1
+    # Insert donor1
     tree.insert(2, "TTTAAACCC", "donor1")
-    # 插入donor2(切断donor1)
+    # Insert donor2(cut off donor1)
     tree.insert(4, "GGG", "donor2")
-    # 插入donor3(再次切断donor1)
+    # Insert donor3(cut off donor1 again)
     tree.insert(8, "TTT", "donor3")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1,  # 期望至少有1个重建
-        "has_clean_reconstructions": True,  # 期望有清洁重建
-        "has_full_reconstructions": True,  # 期望有完整重建
-        "cutter_sequences": ["GGG", "TTT"]  # 期望在完整重建中找到至少一个切割者序列
+        "min_reconstructions": 1,  # Expected at least 1 reconstruction
+        "has_clean_reconstructions": True,  # Expected clean reconstruction
+        "has_full_reconstructions": True,  # Expected full reconstruction
+        "cutter_sequences": ["GGG", "TTT"]  # Expected to find at least one cutter sequence in full reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
-        # 验证清洁重建和完整重建的存在性
+        # Verify clean and full reconstruction existence
         clean_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"]
         full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
         
         if expected["has_clean_reconstructions"] and not clean_recon:
             success = False
-            reason = "缺少清洁重建"
+            reason = "Missing clean reconstruction"
         elif expected["has_full_reconstructions"] and not full_recon:
             success = False
-            reason = "缺少完整重建"
+            reason = "Missing full reconstruction"
         else:
-            # 检查完整重建中是否包含任何切割者序列
+            # Check if full reconstruction contains any cutter sequence
             has_cutter = False
             for cutter in expected["cutter_sequences"]:
                 if any(cutter in str(r.seq) for r in full_recon):
@@ -407,513 +409,513 @@ def test_comprehensive_nesting():
             
             if not has_cutter:
                 success = False
-                reason = "未找到包含切割者序列的完整重建"
+                reason = "No full reconstruction containing cutter sequence"
     
-    # 记录测试结果
-    test_results.append(("场景6", success, reason if not success else "多重切割重建正确"))
+    # Record test results
+    test_results.append(("Scenario 6", success, reason if not success else "Multiple cuts reconstruction correct"))
     if success:
-        print("✓ 场景6测试通过: 多重切割重建正确")
+        print("✓ Scenario 6 test passed: Multiple cuts reconstruction correct")
     else:
-        print(f"✗ 场景6测试失败: {reason}")
+        print(f"✗ Scenario 6 test failed: {reason}")
     
-    # ======== 场景7: 连锁切割 ========
-    print("\n===== 测试场景7: 连锁切割 =====")
-    # 创建初始序列
+    # ======== Scenario 7: Chain cutting ========
+    print("\n===== Testing Scenario 7: Chain cutting =====")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 插入donor1
+    # Insert donor1
     tree.insert(2, "TTTAAA", "donor1")
-    # 插入donor2(切断donor1)
+    # Insert donor2(cut off donor1)
     tree.insert(4, "GGGCCC", "donor2")
-    # 插入donor3(切断donor2)
+    # Insert donor3(cut off donor2)
     tree.insert(6, "AAA", "donor3")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 3,  # 期望至少有3个重建
-        "min_full_reconstructions": 1,  # 期望至少有1个完整重建
-        "min_clean_reconstructions": 1,  # 期望至少有1个清洁重建
+        "min_reconstructions": 3,  # Expected at least 3 reconstructions
+        "min_full_reconstructions": 1,  # Expected at least 1 full reconstruction
+        "min_clean_reconstructions": 1,  # Expected at least 1 clean reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
         full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
         clean_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"]
         
         if len(full_recon) < expected["min_full_reconstructions"]:
             success = False
-            reason = f"期望至少{expected['min_full_reconstructions']}个完整重建，但得到了{len(full_recon)}个"
+            reason = f"Expected at least {expected['min_full_reconstructions']} full reconstructions, but got {len(full_recon)}"
         elif len(clean_recon) < expected["min_clean_reconstructions"]:
             success = False
-            reason = f"期望至少{expected['min_clean_reconstructions']}个清洁重建，但得到了{len(clean_recon)}个"
+            reason = f"Expected at least {expected['min_clean_reconstructions']} clean reconstructions, but got {len(clean_recon)}"
     
-    # 记录测试结果
-    test_results.append(("场景7", success, reason if not success else "连锁切割重建正确"))
+    # Record test results
+    test_results.append(("Scenario 7", success, reason if not success else "Chain cutting reconstruction correct"))
     if success:
-        print("✓ 场景7测试通过: 连锁切割重建正确")
+        print("✓ Scenario 7 test passed: Chain cutting reconstruction correct")
     else:
-        print(f"✗ 场景7测试失败: {reason}")
+        print(f"✗ Scenario 7 test failed: {reason}")
     
-    # ======== 场景8: 首尾插入边界情况 ========
-    print("\n===== 测试场景8: 首尾插入边界情况 =====")
-    # 创建初始序列
+    # ======== Scenario 8: First and last insertion boundary cases ========
+    print("\n===== Testing Scenario 8: First and last insertion boundary cases =====")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 在序列起始位置插入donor
+    # Insert donor at start of sequence
     tree.insert(1, "TTT", "donor1")
-    # 在序列末尾插入donor
+    # Insert donor at end of sequence
     tree.insert(7, "GGG", "donor2")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1  # 期望至少有1个重建
+        "min_reconstructions": 1  # Expected at least 1 reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     
-    # 记录测试结果
-    test_results.append(("场景8", success, reason if not success else "首尾插入边界情况正确处理"))
+    # Record test results
+    test_results.append(("Scenario 8", success, reason if not success else "First and last insertion boundary cases correct processing"))
     if success:
-        print("✓ 场景8测试通过: 首尾插入边界情况正确处理")
+        print("✓ Scenario 8 test passed: First and last insertion boundary cases correct processing")
     else:
-        print(f"✗ 场景8测试失败: {reason}")
+        print(f"✗ Scenario 8 test failed: {reason}")
     
-    # ======== 场景9: 同一位置多个插入 ========
-    print("\n===== 测试场景9: 同一位置多个插入 =====")
-    # 创建初始序列
+    # ======== Scenario 9: Multiple insertions at same position ========
+    print("\n===== Testing Scenario 9: Multiple insertions at same position =====")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 在同一位置插入两个donor
+    # Insert two donors at same position
     tree.insert(2, "TTT", "donor1")
     tree.insert(2, "GGG", "donor2")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1  # 期望至少有1个重建
+        "min_reconstructions": 1  # Expected at least 1 reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     
-    # 记录测试结果
-    test_results.append(("场景9", success, reason if not success else "同一位置多个插入正确处理"))
+    # Record test results
+    test_results.append(("Scenario 9", success, reason if not success else "Multiple insertions at same position correct processing"))
     if success:
-        print("✓ 场景9测试通过: 同一位置多个插入正确处理")
+        print("✓ Scenario 9 test passed: Multiple insertions at same position correct processing")
     else:
-        print(f"✗ 场景9测试失败: {reason}")
+        print(f"✗ Scenario 9 test failed: {reason}")
     
-    # ======== 场景10: 随机多donor复杂网络 ========
-    print("\n===== 测试场景10: 随机多donor复杂网络 =====")
-    # 创建初始序列
+    # ======== Scenario 10: Random multi-donor complex network ========
+    print("\n===== Testing Scenario 10: Random multi-donor complex network =====")
+    # Create initial sequence
     tree = SequenceTree("ATGCATGCATGC")
-    # 插入多个相互切割的donor
+    # Insert multiple mutually cutting donors
     tree.insert(3, "AAATTT", "donor1")
     tree.insert(5, "CCCGGG", "donor2")
     tree.insert(8, "TTTAAA", "donor3")
     tree.insert(10, "GGGCCC", "donor4")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 4  # 期望至少有4个重建
+        "min_reconstructions": 4  # Expected at least 4 reconstructions
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     
-    # 记录测试结果
-    test_results.append(("场景10", success, reason if not success else "随机多donor复杂网络正确处理"))
+    # Record test results
+    test_results.append(("Scenario 10", success, reason if not success else "Random multi-donor complex network correct processing"))
     if success:
-        print("✓ 场景10测试通过: 随机多donor复杂网络正确处理")
+        print("✓ Scenario 10 test passed: Random multi-donor complex network correct processing")
     else:
-        print(f"✗ 场景10测试失败: {reason}")
+        print(f"✗ Scenario 10 test failed: {reason}")
     
-    # ======== 场景11: 空序列处理 ========
-    print("\n===== 测试场景11: 空序列处理 =====")
-    # 创建空序列
+    # ======== Scenario 11: Empty sequence handling ========
+    print("\n===== Testing Scenario 11: Empty sequence handling =====")
+    # Create empty sequence
     tree = SequenceTree("")
-    # 插入donor到空序列
+    # Insert donor to empty sequence
     tree.insert(1, "TTT", "donor1")
     
-    # 定义预期结果 - 根据SequenceTree的实际行为
+    # Define expected results - based on actual behavior of SequenceTree
     expected = {
-        "should_have_reconstructions": False  # 期望无重建(因为没有嵌套或切割)
+        "should_have_reconstructions": False  # Expected no reconstructions (because no nesting or cutting)
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if expected["should_have_reconstructions"] == False:
         if reconstructed and len(reconstructed) > 0:
             success = False
-            reason = f"期望无重建，但得到了{len(reconstructed)}个重建"
+            reason = f"Expected no reconstructions, but got {len(reconstructed)} reconstructions"
     else:
         if reconstructed is None or len(reconstructed) == 0:
             success = False
-            reason = "期望有重建，但未获得任何重建"
+            reason = "Expected reconstructions, but none obtained"
     
-    # 记录测试结果
-    test_results.append(("场景11", success, reason if not success else "空序列正确处理"))
+    # Record test results
+    test_results.append(("Scenario 11", success, reason if not success else "Empty sequence correct processing"))
     if success:
-        print("✓ 场景11测试通过: 空序列正确处理")
+        print("✓ Scenario 11 test passed: Empty sequence correct processing")
     else:
-        print(f"✗ 场景11测试失败: {reason}")
+        print(f"✗ Scenario 11 test failed: {reason}")
     
-    # ======== 场景12: 极长序列处理 ========
-    print("\n===== 测试场景12: 极长序列处理 =====")
-    # 创建一个较长序列（1000个碱基）
+    # ======== Scenario 12: Extremely long sequence handling ========
+    print("\n===== Testing Scenario 12: Extremely long sequence handling =====")
+    # Create a longer sequence (1000 bases)
     long_seq = "A" * 400 + "T" * 300 + "G" * 200 + "C" * 100
     tree = SequenceTree(long_seq)
-    # 插入两个相互嵌套的donor
+    # Insert two mutually nested donors
     tree.insert(500, "AAATTT", "donor1")
     tree.insert(502, "GGG", "donor2")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1,  # 期望至少有1个重建
-        "min_full_reconstructions": 1  # 期望至少有1个完整重建
+        "min_reconstructions": 1,  # Expected at least 1 reconstruction
+        "min_full_reconstructions": 1  # Expected at least 1 full reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
         full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
         if len(full_recon) < expected["min_full_reconstructions"]:
             success = False
-            reason = f"期望至少{expected['min_full_reconstructions']}个完整重建，但得到了{len(full_recon)}个"
+            reason = f"Expected at least {expected['min_full_reconstructions']} full reconstructions, but got {len(full_recon)}"
     
-    # 记录测试结果
-    test_results.append(("场景12", success, reason if not success else "极长序列正确处理"))
+    # Record test results
+    test_results.append(("Scenario 12", success, reason if not success else "Extremely long sequence correct processing"))
     if success:
-        print("✓ 场景12测试通过: 极长序列正确处理")
+        print("✓ Scenario 12 test passed: Extremely long sequence correct processing")
     else:
-        print(f"✗ 场景12测试失败: {reason}")
+        print(f"✗ Scenario 12 test failed: {reason}")
     
-    # ======== 场景13: 完全重叠切割 ========
-    print("\n===== 测试场景13: 完全重叠切割 =====")
-    # 创建初始序列
+    # ======== Scenario 13: Completely overlapping cuts ========
+    print("\n===== Testing Scenario 13: Completely overlapping cuts =====")
+    # Create initial sequence
     tree = SequenceTree("ATGCATGC")
-    # 创建一个donor
+    # Create a donor
     tree.insert(2, "AAATTTCCC", "donor1")
-    # 创建两个同时在相同位置切割的donor
+    # Create two donors simultaneously cutting the same position
     tree.insert(5, "GGG", "cutter1")
     tree.insert(5, "TTT", "cutter2")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1,  # 期望至少有1个重建
-        "min_clean_reconstructions": 1,  # 期望至少有1个清洁重建
-        "min_full_reconstructions": 1   # 期望至少有1个完整重建
+        "min_reconstructions": 1,  # Expected at least 1 reconstruction
+        "min_clean_reconstructions": 1,  # Expected at least 1 clean reconstruction
+        "min_full_reconstructions": 1   # Expected at least 1 full reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
-        # 应该至少有一个清洁重建和一个完整重建
+        # Should have at least one clean reconstruction and one full reconstruction
         clean_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"]
         full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
         
         if len(clean_recon) < expected["min_clean_reconstructions"]:
             success = False
-            reason = f"期望至少{expected['min_clean_reconstructions']}个清洁重建，但只得到了{len(clean_recon)}个"
+            reason = f"Expected at least {expected['min_clean_reconstructions']} clean reconstructions, but only got {len(clean_recon)}"
         elif len(full_recon) < expected["min_full_reconstructions"]:
             success = False
-            reason = f"期望至少{expected['min_full_reconstructions']}个完整重建，但只得到了{len(full_recon)}个"
+            reason = f"Expected at least {expected['min_full_reconstructions']} full reconstructions, but only got {len(full_recon)}"
     
-    # 记录测试结果
-    test_results.append(("场景13", success, reason if not success else "完全重叠切割正确处理"))
+    # Record test results
+    test_results.append(("Scenario 13", success, reason if not success else "Completely overlapping cuts correct processing"))
     if success:
-        print("✓ 场景13测试通过: 完全重叠切割正确处理")
+        print("✓ Scenario 13 test passed: Completely overlapping cuts correct processing")
     else:
-        print(f"✗ 场景13测试失败: {reason}")
+        print(f"✗ Scenario 13 test failed: {reason}")
     
-    # ======== 场景14: 边界切割 ========
-    print("\n===== 测试场景14: 边界切割 =====")
-    # 创建初始序列
+    # ======== Scenario 14: Boundary cutting ========
+    print("\n===== Testing Scenario 14: Boundary cutting =====")
+    # Create initial sequence
     tree = SequenceTree("ATGCATGC")
-    # 创建一个donor
+    # Create a donor
     tree.insert(2, "AAATTTCCC", "donor1")
-    # 创建一个在donor边界处切割的cutter
-    tree.insert(2, "GGG", "cutter1")  # 在donor开头切割
+    # Create a cutter cutting at donor boundary
+    tree.insert(2, "GGG", "cutter1")  # Cutting at donor start
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1  # 期望至少有1个重建
+        "min_reconstructions": 1  # Expected at least 1 reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     
-    # 记录测试结果
-    test_results.append(("场景14", success, reason if not success else "边界切割正确处理"))
+    # Record test results
+    test_results.append(("Scenario 14", success, reason if not success else "Boundary cutting correct processing"))
     if success:
-        print("✓ 场景14测试通过: 边界切割正确处理")
+        print("✓ Scenario 14 test passed: Boundary cutting correct processing")
     else:
-        print(f"✗ 场景14测试失败: {reason}")
+        print(f"✗ Scenario 14 test failed: {reason}")
     
-    # ======== 场景15: 多donor同时切割另一donor的不同位置 ========
-    print("\n===== 测试场景15: 多donor同时切割另一donor的不同位置 =====")
-    # 创建初始序列
+    # ======== Scenario 15: Multiple donors simultaneously cutting another donor at different positions ========
+    print("\n===== Testing Scenario 15: Multiple donors simultaneously cutting another donor at different positions =====")
+    # Create initial sequence
     tree = SequenceTree("ATGCATGC")
-    # 创建主donor
+    # Create main donor
     tree.insert(2, "AAAAAAAAAATTTTTTTTTTGGGGGGGGGG", "main_donor")  # 30bp
-    # 创建三个切割者
-    tree.insert(5, "CCC", "cutter1")  # 切割前段
-    tree.insert(15, "TTT", "cutter2")  # 切割中段
-    tree.insert(25, "GGG", "cutter3")  # 切割后段
+    # Create three cutters
+    tree.insert(5, "CCC", "cutter1")  # Cutting front segment
+    tree.insert(15, "TTT", "cutter2")  # Cutting middle segment
+    tree.insert(25, "GGG", "cutter3")  # Cutting back segment
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1,  # 期望至少有1个重建
-        "has_clean_reconstructions": True  # 期望有清洁重建
+        "min_reconstructions": 1,  # Expected at least 1 reconstruction
+        "has_clean_reconstructions": True  # Expected clean reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
-        # 检查清洁重建
+        # Check clean reconstruction
         clean_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"]
         if expected["has_clean_reconstructions"] and not clean_recon:
             success = False
-            reason = "未找到主donor的清洁重建"
+            reason = "Missing main donor clean reconstruction"
     
-    # 记录测试结果
-    test_results.append(("场景15", success, reason if not success else "多donor同时切割另一donor的不同位置正确处理"))
+    # Record test results
+    test_results.append(("Scenario 15", success, reason if not success else "Multiple donors simultaneously cutting another donor at different positions correct processing"))
     if success:
-        print("✓ 场景15测试通过: 多donor同时切割另一donor的不同位置正确处理")
-        # 检查完整重建数量
+        print("✓ Scenario 15 test passed: Multiple donors simultaneously cutting another donor at different positions correct processing")
+        # Check full reconstruction count
         full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
-        print(f"  完整重建数量: {len(full_recon)}")
+        print(f"   Full reconstruction count: {len(full_recon)}")
     else:
-        print(f"✗ 场景15测试失败: {reason}")
+        print(f"✗ Scenario 15 test failed: {reason}")
     
-    # ======== 场景16: 复杂切割网络 - 多个donor相互交错切割 ========
-    print("\n===== 测试场景16: 复杂切割网络 - 多个donor相互交错切割 =====")
-    # 创建初始序列
+    # ======== Scenario 16: Complex cutting network - Multiple donors mutually cutting each other ========
+    print("\n===== Testing Scenario 16: Complex cutting network - Multiple donors mutually cutting each other =====")
+    # Create initial sequence
     tree = SequenceTree("ATGCATGCATGCATGCATGC")
-    # 创建5个donor，形成复杂的交错切割网络
+    # Create 5 donors, forming complex mutually cutting network
     tree.insert(2, "AAAAAAAAAA", "donor_a")   # A
     tree.insert(12, "TTTTTTTTTT", "donor_b")  # B
     tree.insert(22, "GGGGGGGGGG", "donor_c")  # C
     tree.insert(32, "CCCCCCCCCC", "donor_d")  # D
     tree.insert(42, "ATATATATAT", "donor_e")  # E
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1  # 期望至少有1个重建
+        "min_reconstructions": 1  # Expected at least 1 reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     
-    # 记录测试结果
-    test_results.append(("场景16", success, reason if not success else f"复杂切割网络正确处理，生成了{len(reconstructed) if reconstructed else 0}个重建"))
+    # Record test results
+    test_results.append(("Scenario 16", success, reason if not success else f"Complex cutting network correct processing, generated {len(reconstructed) if reconstructed else 0} reconstructions"))
     if success:
-        print(f"✓ 场景16测试通过: 复杂切割网络正确处理，生成了{len(reconstructed) if reconstructed else 0}个重建")
+        print(f"✓ Scenario 16 test passed: Complex cutting network correct processing, generated {len(reconstructed) if reconstructed else 0} reconstructions")
     else:
-        print(f"✗ 场景16测试失败: {reason}")
+        print(f"✗ Scenario 16 test failed: {reason}")
     
-    # ======== 场景17: 序列末尾边界切割和首尾部特殊切割 ========
-    print("\n===== 测试场景17: 序列末尾边界切割和首尾部特殊切割 =====")
-    # 创建初始序列
+    # ======== Scenario 17: Sequence end boundary cutting and first and last tail special cutting ========
+    print("\n===== Testing Scenario 17: Sequence end boundary cutting and first and last tail special cutting =====")
+    # Create initial sequence
     tree = SequenceTree("ATGCATGC")
-    # 创建donor序列
+    # Create donor sequence
     tree.insert(2, "AAAATTTTGGGG", "donor")  # 12bp
-    # 创建在首尾位置切割的donor
-    tree.insert(2, "CCC", "cutter1")  # 在donor开头切割
-    tree.insert(14, "TTT", "cutter2")  # 在donor结尾切割
+    # Create donor cutting at first and last positions
+    tree.insert(2, "CCC", "cutter1")  # Cutting at donor start
+    tree.insert(14, "TTT", "cutter2")  # Cutting at donor end
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1,  # 期望至少有1个重建
-        "has_clean_reconstructions": True  # 期望有清洁重建
+        "min_reconstructions": 1,  # Expected at least 1 reconstruction
+        "has_clean_reconstructions": True  # Expected clean reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     elif expected["has_clean_reconstructions"]:
-        # 检查是否正确处理多重切割
+        # Check if correctly processed multiple cuts
         clean_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "clean"]
         if not clean_recon:
             success = False
-            reason = "未找到donor的清洁重建"
+            reason = "Missing donor clean reconstruction"
     
-    # 记录测试结果
-    test_results.append(("场景17", success, reason if not success else "序列末尾边界切割和首尾部特殊切割正确处理"))
+    # Record test results
+    test_results.append(("Scenario 17", success, reason if not success else "Sequence end boundary cutting and first and last tail special cutting correct processing"))
     if success:
-        print("✓ 场景17测试通过: 序列末尾边界切割和首尾部特殊切割正确处理")
+        print("✓ Scenario 17 test passed: Sequence end boundary cutting and first and last tail special cutting correct processing")
     else:
-        print(f"✗ 场景17测试失败: {reason}")
+        print(f"✗ Scenario 17 test failed: {reason}")
     
-    # ======== 场景18: 深度嵌套 ========
-    print("\n===== 测试场景18: 深度嵌套 =====")
-    # 创建初始序列
+    # ======== Scenario 18: Deep nesting ========
+    print("\n===== Testing Scenario 18: Deep nesting =====")
+    # Create initial sequence
     tree = SequenceTree("ATGCATGC")
-    # 创建5层嵌套的donor
-    tree.insert(2, "AAAAAAAA", "donor1")  # 最外层
-    tree.insert(4, "TTTTTTTT", "donor2")  # 第2层
-    tree.insert(6, "GGGGGGGG", "donor3")  # 第3层
-    tree.insert(8, "CCCCCCCC", "donor4")  # 第4层
-    tree.insert(10, "AAAATTTT", "donor5") # 最内层
+    # Create 5 layers of nested donors
+    tree.insert(2, "AAAAAAAA", "donor1")  # Outer layer
+    tree.insert(4, "TTTTTTTT", "donor2")  # 2nd layer
+    tree.insert(6, "GGGGGGGG", "donor3")  # 3rd layer
+    tree.insert(8, "CCCCCCCC", "donor4")  # 4th layer
+    tree.insert(10, "AAAATTTT", "donor5") # Inner layer
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "min_reconstructions": 1,  # 期望至少有1个重建
-        "min_full_reconstructions": 1  # 期望至少有1个完整重建
+        "min_reconstructions": 1,  # Expected at least 1 reconstruction
+        "min_full_reconstructions": 1  # Expected at least 1 full reconstruction
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if reconstructed is None or len(reconstructed) < expected["min_reconstructions"]:
         success = False
-        reason = f"期望至少{expected['min_reconstructions']}个重建，但得到了{len(reconstructed) if reconstructed else 0}个重建"
+        reason = f"Expected at least {expected['min_reconstructions']} reconstructions, but got {len(reconstructed) if reconstructed else 0} reconstructions"
     else:
         full_recon = [r for r in reconstructed if r.annotations.get("reconstruction_type") == "full"]
         if len(full_recon) < expected["min_full_reconstructions"]:
             success = False
-            reason = f"期望至少{expected['min_full_reconstructions']}个完整重建，但得到了{len(full_recon)}个"
+            reason = f"Expected at least {expected['min_full_reconstructions']} full reconstructions, but got {len(full_recon)}"
     
-    # 记录测试结果
-    test_results.append(("场景18", success, reason if not success else "深度嵌套正确处理"))
+    # Record test results
+    test_results.append(("Scenario 18", success, reason if not success else "Deep nesting correct processing"))
     if success:
-        print("✓ 场景18测试通过: 深度嵌套正确处理")
-        print(f"  生成了{len(full_recon)}个完整重建")
+        print("✓ Scenario 18 test passed: Deep nesting correct processing")
+        print(f"   Generated {len(full_recon)} full reconstructions")
     else:
-        print(f"✗ 场景18测试失败: {reason}")
+        print(f"✗ Scenario 18 test failed: {reason}")
     
-    # ======== 场景19: 极端短序列和空序列切割处理 ========
-    print("\n===== 测试场景19: 极端短序列和空序列切割处理 =====")
-    # 创建初始序列
+    # ======== Scenario 19: Extremely short sequence and empty sequence cutting processing ========
+    print("\n===== Testing Scenario 19: Extremely short sequence and empty sequence cutting processing =====")
+    # Create initial sequence
     tree = SequenceTree("ATGC")
-    # 创建极短donor序列
+    # Create extremely short donor sequence
     tree.insert(2, "A", "short_donor")
-    # 创建一个切割极短序列的donor
+    # Create a donor cutting extremely short sequence
     tree.insert(2, "TTT", "cutter")
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "should_have_reconstructions": True  # 期望有重建
+        "should_have_reconstructions": True  # Expected reconstructions
     }
     
-    # 验证结果
+    # Verify results
     _, reconstructed = tree.donors("test")
     
-    # 明确的断言检查
+    # Explicit assertion checks
     success = True
     reason = ""
     
     if expected["should_have_reconstructions"]:
         if reconstructed is None or len(reconstructed) == 0:
             success = False
-            reason = "期望有重建，但未获得任何重建"
+            reason = "Expected reconstructions, but none obtained"
     else:
         if reconstructed and len(reconstructed) > 0:
             success = False
-            reason = f"期望无重建，但得到了{len(reconstructed)}个重建"
+            reason = f"Expected no reconstructions, but got {len(reconstructed)} reconstructions"
     
-    # 记录测试结果
-    test_results.append(("场景19", success, reason if not success else "极端短序列正确处理"))
+    # Record test results
+    test_results.append(("Scenario 19", success, reason if not success else "Extremely short sequence correct processing"))
     if success:
-        print("✓ 场景19测试通过: 极端短序列正确处理")
+        print("✓ Scenario 19 test passed: Extremely short sequence correct processing")
     else:
-        print(f"✗ 场景19测试失败: {reason}")
+        print(f"✗ Scenario 19 test failed: {reason}")
     
-    # ======== 显示最终测试结果 ========
-    print("\n===== 综合测试结果 =====")
+    # ======== Display final test results ========
+    print("\n===== Comprehensive test results =====")
     passed = sum(1 for _, result, _ in test_results if result)
     total = len(test_results)
-    print(f"测试完成: {passed}/{total} 通过")
+    print(f"Test completed: {passed}/{total} passed")
     if passed == total:
-        print("✓ 所有场景测试通过！重建算法工作正常")
+        print("✓ All scenarios passed! Reconstruction algorithm works correctly")
     else:
-        print("✗ 部分测试未通过，请检查重建算法")
+        print("✗ Some scenarios failed, please check the reconstruction algorithm")
         for name, result, message in test_results:
             if not result:
                 print(f"  - {name}: {message}")
@@ -923,179 +925,179 @@ def test_comprehensive_nesting():
 
 def test_multiple_cuts_fragments_distinction():
     """
-    测试多重切割情况下片段区分功能的改进
-    验证在一个节点被多次切割的情况下，能否正确区分不同切割者产生的片段
+    Test improvement of fragment distinction function for multiple cutting scenarios
+    Verify if it can correctly distinguish different fragments produced by different cutters
     
     Returns:
-        bool: 测试是否成功
+        bool: Whether test passed
     """
-    print("\n===== 测试多重切割片段区分功能 =====")
+    print("\n===== Testing multiple cutting fragment distinction function =====")
     
-    # 初始化树数据结构
-    tree = SequenceTree("ATGCATGCATGCATGCATGCATGCATGCATGCATGC")  # 原始序列
+    # Initialize tree data structure
+    tree = SequenceTree("ATGCATGCATGCATGCATGCATGCATGCATGCATGC")  # Original sequence
 
-    # 创建一个被多次切割的场景
-    # 原始序列被三个不同的donor切割：
-    # - donor 1 切割在位置10
-    # - donor 2 切割在位置20
-    # - donor 3 切割在位置30
+    # Create a scenario with multiple cuts
+    # The original sequence is cut by three different donors:
+    # - donor 1 cuts at position 10
+    # - donor 2 cuts at position 20
+    # - donor 3 cuts at position 30
     
-    # 插入donor序列在相应位置
+    # Insert donor sequences at respective positions
     tree.insert(10, "GTACGTAC", "cutter1")
     tree.insert(20, "CCGGAATT", "cutter2")
     tree.insert(30, "TTAGGCCA", "cutter3")
     
-    # 获取事件日志
+    # Get event journal
     event_journal = tree.event_journal
     
-    # 定义预期结果
+    # Define expected results
     expected = {
-        "event_count": 3,  # 期望有3个事件记录
-        "donor_uids": [],  # 将在测试过程中填充
-        "fragment_uids": [],  # 将在测试过程中填充
-        "has_valid_fragment_info": True,  # 期望所有片段都有有效信息
-        "fragment_cutter_match": True,  # 期望每个片段的切割者信息与事件中的donor_uid一致
+        "event_count": 3,  # Expected 3 event records
+        "donor_uids": [],  # Will be filled during test
+        "fragment_uids": [],  # Will be filled during test
+        "has_valid_fragment_info": True,  # Expected all fragments to have valid information
+        "fragment_cutter_match": True,  # Expected cutter information in fragment to match donor_uid in event
     }
     
-    # 测试片段区分功能
+    # Test fragment distinction function
     success = True
     error_messages = []
     
-    # 1. 验证事件记录是否完整
+    # 1. Verify if event records are complete
     if len(event_journal.events) != expected["event_count"]:
-        error_messages.append(f"错误: 应记录{expected['event_count']}个事件，但找到 {len(event_journal.events)} 个")
+        error_messages.append(f"Error: Should record {expected['event_count']} events, but found {len(event_journal.events)}")
         success = False
     
-    # 2. 获取事件信息并填充预期结果中的UID列表
+    # 2. Get event information and fill expected results UID list
     for event in event_journal.events:
-        print(f"事件 {event.event_id}: donor({event.donor_uid}) → target({event.target_uid}) → [L({event.left_uid}), R({event.right_uid})]")
+        print(f"Event {event.event_id}: donor({event.donor_uid}) → target({event.target_uid}) → [L({event.left_uid}), R({event.right_uid})]")
         
-        # 记录donor和fragment的UID
+        # Record donor and fragment UID
         expected["donor_uids"].append(event.donor_uid)
         expected["fragment_uids"].append(event.left_uid)
         expected["fragment_uids"].append(event.right_uid)
         
-        # 检查donor是否正确标记
+        # Check donor is correctly marked
         if not event_journal.is_donor(event.donor_uid):
-            error_messages.append(f"错误: UID {event.donor_uid} 应被标记为donor")
+            error_messages.append(f"Error: UID {event.donor_uid} should be marked as donor")
             success = False
         
-        # 检查片段是否正确标记
+        # Check fragment is correctly marked
         if not event_journal.is_fragment(event.left_uid):
-            error_messages.append(f"错误: UID {event.left_uid} 应被标记为fragment")
+            error_messages.append(f"Error: UID {event.left_uid} should be marked as fragment")
             success = False
         
         if not event_journal.is_fragment(event.right_uid):
-            error_messages.append(f"错误: UID {event.right_uid} 应被标记为fragment")
+            error_messages.append(f"Error: UID {event.right_uid} should be marked as fragment")
             success = False
         
-        # 检查片段信息
+        # Check fragment information
         left_info = event_journal.get_fragment_info(event.left_uid)
         right_info = event_journal.get_fragment_info(event.right_uid)
         
         if left_info:
             orig_uid, is_left, cutter_uid = left_info
-            print(f"  左片段 {event.left_uid}: 来自 {orig_uid}, "
-                  f"{'左' if is_left else '右'}侧, 切割者 {cutter_uid}")
+            print(f"   Left fragment {event.left_uid}: From {orig_uid}, "
+                  f"{'Left' if is_left else 'Right'} side, Cutter {cutter_uid}")
             
-            # 验证切割者信息
+            # Verify cutter information
             if expected["fragment_cutter_match"] and cutter_uid != event.donor_uid:
-                error_messages.append(f"错误: 左片段 {event.left_uid} 的切割者应为 {event.donor_uid}，但得到 {cutter_uid}")
+                error_messages.append(f"Error: Left fragment {event.left_uid} cutter should be {event.donor_uid}, but got {cutter_uid}")
                 success = False
         elif expected["has_valid_fragment_info"]:
-            error_messages.append(f"错误: 未找到左片段 {event.left_uid} 的信息")
+            error_messages.append(f"Error: Left fragment {event.left_uid} information not found")
             success = False
         
         if right_info:
             orig_uid, is_left, cutter_uid = right_info
-            print(f"  右片段 {event.right_uid}: 来自 {orig_uid}, "
-                  f"{'左' if is_left else '右'}侧, 切割者 {cutter_uid}")
+            print(f"   Right fragment {event.right_uid}: From {orig_uid}, "
+                  f"{'Left' if is_left else 'Right'} side, Cutter {cutter_uid}")
             
-            # 验证切割者信息
+            # Verify cutter information
             if expected["fragment_cutter_match"] and cutter_uid != event.donor_uid:
-                error_messages.append(f"错误: 右片段 {event.right_uid} 的切割者应为 {event.donor_uid}，但得到 {cutter_uid}")
+                error_messages.append(f"Error: Right fragment {event.right_uid} cutter should be {event.donor_uid}, but got {cutter_uid}")
                 success = False
         elif expected["has_valid_fragment_info"]:
-            error_messages.append(f"错误: 未找到右片段 {event.right_uid} 的信息")
+            error_messages.append(f"Error: Right fragment {event.right_uid} information not found")
             success = False
     
-    # 3. 测试获取重建结果
+    # 3. Test get reconstruction results
     _, reconstructed = tree.donors("test")
     
-    # 定义重建的预期结果
+    # Define expected reconstruction results
     recon_expected = {
-        "should_have_reconstructions": True  # 期望有重建结果
+        "should_have_reconstructions": True  # Expected reconstruction results
     }
     
     if recon_expected["should_have_reconstructions"] and not reconstructed:
-        error_messages.append("错误: 未获得任何重建结果")
+        error_messages.append("Error: No reconstruction results obtained")
         success = False
     else:
-        print(f"获得 {len(reconstructed) if reconstructed else 0} 个重建结果")
-        # 输出重建记录信息
+        print(f"Obtained {len(reconstructed) if reconstructed else 0} reconstruction results")
+        # Output reconstruction record information
         if reconstructed:
             for rec in reconstructed:
-                recon_type = rec.annotations.get("reconstruction_type", "未知")
-                original_uid = rec.annotations.get("original_uid", "未知")
+                recon_type = rec.annotations.get("reconstruction_type", "Unknown")
+                original_uid = rec.annotations.get("original_uid", "Unknown")
                 seq_len = len(rec.seq)
-                print(f"  重建: 类型={recon_type}, 原始UID={original_uid}, 序列长度={seq_len}")
+                print(f"   Reconstruction: Type={recon_type}, OriginalUID={original_uid}, Sequence Length={seq_len}")
     
-    # 4. 生成DOT可视化
+    # 4. Generate DOT visualization
     dot_str = event_journal.to_graphviz_dot()
     
-    # 定义DOT可视化的预期结果
+    # Define expected DOT visualization results
     dot_expected = {
-        "contains_nodes": True,  # 期望DOT包含节点信息
-        "contains_events": True  # 期望DOT包含事件信息
+        "contains_nodes": True,  # Expected DOT to contain node information
+        "contains_events": True  # Expected DOT to contain event information
     }
     
-    # 检查DOT字符串中是否包含节点和事件信息
+    # Check if DOT string contains node and event information
     if dot_expected["contains_nodes"] and "node_" not in dot_str:
-        error_messages.append("错误: DOT可视化中应包含节点信息")
+        error_messages.append("Error: DOT visualization should contain node information")
         success = False
     
     if dot_expected["contains_events"] and "event_" not in dot_str:
-        error_messages.append("错误: DOT可视化中应包含事件信息")
+        error_messages.append("Error: DOT visualization should contain event information")
         success = False
     
     if success:
-        print("✓ 多重切割片段区分功能测试通过!")
+        print("✓ Multiple cutting fragment distinction function test passed!")
     else:
-        print("✗ 多重切割片段区分功能测试失败!")
+        print("✗ Multiple cutting fragment distinction function test failed!")
         for error in error_messages:
             print(f"  {error}")
     
     return success
 
 
-# 如果作为主程序运行，执行所有测试
+# If run as main program, execute all tests
 if __name__ == "__main__":
-    print("执行测试...")
+    print("Executing tests...")
     
-    # 执行多重切割测试
+    # Execute multiple cutting test
     success1 = test_multiple_cuts()
     if not success1:
-        print("  - 多重切割测试未通过")
+        print("  - Multiple cutting test failed")
         
-    # 执行综合嵌套测试
+    # Execute comprehensive nesting test
     success2 = test_comprehensive_nesting()
     if not success2:
-        print("  - 综合嵌套测试未通过") 
+        print("  - Comprehensive nesting test failed") 
         
-    # 执行多次切割片段区分功能测试
+    # Execute multiple cutting fragment distinction function test
     success3 = test_multiple_cuts_fragments_distinction()
     if not success3:
-        print("  - 多次切割片段区分功能测试未通过")
+        print("  - Multiple cutting fragment distinction function test failed")
     
-    # 显示总体测试结果
-    print("\n===== 总体测试结果 =====")
+    # Display overall test results
+    print("\n===== Overall test results =====")
     if success1 and success2 and success3:
-        print("✓ 所有测试通过！")
+        print("✓ All tests passed!")
     else:
-        print("✗ 部分测试未通过！")
+        print("✗ Some tests failed!")
         if not success1:
-            print("  - 多重切割测试未通过")
+            print("  - Multiple cutting test failed")
         if not success2:
-            print("  - 综合嵌套测试未通过") 
+            print("  - Comprehensive nesting test failed") 
         if not success3:
-            print("  - 多次切割片段区分功能测试未通过")
+            print("  - Multiple cutting fragment distinction function test failed")

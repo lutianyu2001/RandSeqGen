@@ -398,11 +398,11 @@ class SeqGenerator:
 
             print(f"Generated tree and graph visualizations for {seq_record.id}")
 
-        # 如果启用debug模式，打印嵌套关系图的详细信息
+        # If debug mode is enabled, print the nesting graph details
         if self.flag_debug:
-            print(f"\n[DEBUG] 嵌套关系图信息 for {seq_record.id}:")
+            print(f"\n[DEBUG] Nesting graph information for {seq_record.id}:")
             print(str(seq_tree.event_journal))
-            print("[DEBUG] 嵌套关系图信息结束\n")
+            print("[DEBUG] End of nesting graph information\n")
 
         return new_seq_record, all_used_donors, all_reconstructed_donors
 
