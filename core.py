@@ -767,6 +767,7 @@ class SequenceTree:
         # Process fragment and nesting information
         cut_half = ""
 
+        # TODO Revise and apply color assignment logic
         # Redesigned color assignment logic for clarity:
         # 1. First set base colors (donor = blue, acceptor = green)
         # 2. If it's a cut fragment, change to pink

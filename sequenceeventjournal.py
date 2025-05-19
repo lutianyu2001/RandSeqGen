@@ -440,6 +440,11 @@ class SequenceEventJournal:
             if not reconstruct_result:
                 continue
             
+            # Get the node to access donor_id
+            node = self.tree_ref.node_dict.get(uid)
+            if not node:
+                continue
+                
             # Find TSD information for this donor
             tsd_5 = ""
             tsd_3 = ""
@@ -459,9 +464,16 @@ class SequenceEventJournal:
             
             # Create full reconstruction record with TSD removed
             full_id = f"{seq_id}_reconstructed_{uid}"
+            # Add donor_id to the record ID if it exists
+            if node.donor_id:
+                full_id = f"{full_id}-{node.donor_id}"
+                
             full_rec = create_sequence_record(full_seq, full_id)
             full_rec.annotations["reconstruction_type"] = "full"
             full_rec.annotations["original_uid"] = uid
+            # Add donor_id to annotations if it exists
+            if node.donor_id:
+                full_rec.annotations["donor_id"] = node.donor_id
             
             # Remove TSD from clean reconstruction
             clean_seq = reconstruct_result['clean']
@@ -472,9 +484,16 @@ class SequenceEventJournal:
             
             # Create clean reconstruction record with TSD removed
             clean_id = f"{seq_id}_clean_reconstructed_{uid}"
+            # Add donor_id to the record ID if it exists
+            if node.donor_id:
+                clean_id = f"{clean_id}-{node.donor_id}"
+                
             clean_rec = create_sequence_record(clean_seq, clean_id)
             clean_rec.annotations["reconstruction_type"] = "clean"
             clean_rec.annotations["original_uid"] = uid
+            # Add donor_id to annotations if it exists
+            if node.donor_id:
+                clean_rec.annotations["donor_id"] = node.donor_id
             
             # Add to result list
             reconstructed_records.append(full_rec)
@@ -624,6 +643,10 @@ class SequenceEventJournal:
             
             # Create node label
             label = f"{node_type}\\nUID: {uid}\\nLen: {len(node.data)}"
+            
+            # Add donor_id to label if it exists
+            if node.is_donor and node.donor_id:
+                label = f"{node_type}\\nUID: {uid}\\nLen: {len(node.data)}\\nDonor ID: {node.donor_id}"
             
             # Add node to graph
             dot_str.append(f'  node_{uid} [label="{label}", fillcolor="{fill_color}"];')
