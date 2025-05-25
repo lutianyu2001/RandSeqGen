@@ -263,11 +263,11 @@ class SeqGenerator:
 
         Args:
             batch_num: Batch number (starting from 1)
+            seed: Optional seed for this batch
 
         Returns:
             float: Time taken to process this batch (seconds)
         """
-
         if not self.input:
             return None
 
@@ -284,12 +284,14 @@ class SeqGenerator:
         all_sequences = []
         all_donors = [] if self.flag_track else None
         all_reconstructed_donors = [] if self.flag_track else None
+        all_seq_trees = []
 
         with mp.Pool(self.processors) as pool:
             results = pool.imap_unordered(self._imap_worker_process_single_sequence, mp_args_gen, chunksize=1)
 
-            for i, (processed_seq, donors, reconstructed) in enumerate(results, 1):
+            for i, (processed_seq, donors, reconstructed, seq_tree) in enumerate(results, 1):
                 all_sequences.append(processed_seq)
+                all_seq_trees.append((processed_seq.id, seq_tree))
                 if self.flag_track:
                     if donors:
                         all_donors.extend(donors)
@@ -301,7 +303,7 @@ class SeqGenerator:
 
         os.makedirs(self.output_dir_path, exist_ok=True)
         print(f"Output directory: {self.output_dir_path}")
-        self.__save_batch_results(self.output_dir_path, all_sequences, all_donors, all_reconstructed_donors, batch_num)
+        self.__save_batch_results(self.output_dir_path, all_sequences, all_donors, all_reconstructed_donors, batch_num, all_seq_trees)
 
         return time.time() - batch_start_time
 
@@ -310,7 +312,7 @@ class SeqGenerator:
             return self.__process_single_sequence(*args)
         return self.__process_single_sequence(args)
 
-    def __process_single_sequence(self, idx_or_record, seed = None) -> Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]]]:
+    def __process_single_sequence(self, idx_or_record, seed = None) -> Tuple[SeqRecord, Optional[List[SeqRecord]], Optional[List[SeqRecord]], Optional['SequenceTree']]:
         """
         Process a single sequence with random insertions, potentially over multiple iterations.
 
@@ -322,6 +324,7 @@ class SeqGenerator:
                 - The processed sequence
                 - Used donors (if tracking enabled)
                 - Reconstructed donors (if tracking enabled)
+                - The SequenceTree object
         """
         # If idx_or_record is an integer, retrieve the sequence record
         # If it's already a SeqRecord, use it directly
@@ -333,7 +336,7 @@ class SeqGenerator:
         # Check if there are donor sequences to insert
         if not self.insertion or not self.donor_sequences:
             # If no insertions requested or no donor sequences available, return the original sequence
-            return seq_record, None, None
+            return seq_record, None, None, None
 
         # Create a new sequence tree for this sequence
         seq_tree = SequenceTree(str(seq_record.seq), 0)
@@ -404,7 +407,7 @@ class SeqGenerator:
             print(str(seq_tree.event_journal))
             print("[DEBUG] End of nesting graph information\n")
 
-        return new_seq_record, all_used_donors, all_reconstructed_donors
+        return new_seq_record, all_used_donors, all_reconstructed_donors, seq_tree
 
     def execute(self):
         """
@@ -435,10 +438,103 @@ class SeqGenerator:
         print(f"\nAll batches completed in {total_elapsed_time:.2g} seconds")
         print(f"Results saved to \"{os.path.abspath(self.output_dir_path)}\"")
 
+    def _generate_bed_records(self, chrom: str, seq_tree: 'SequenceTree') -> List[str]:
+        """
+        Generate BED format records for all donor insertions in a sequence tree.
+        
+        Args:
+            chrom: Chromosome/sequence ID
+            seq_tree: SequenceTree object containing insertion information
+            
+        Returns:
+            List[str]: List of BED format records
+        """
+        bed_records = []
+        
+        # Get active nodes and position map
+        active_nodes = seq_tree.collect_active_nodes()
+        abs_position_map = seq_tree.event_journal._calculate_absolute_positions()
+        
+        # Process each active donor node
+        for node in active_nodes:
+            if node.is_donor:
+                # Get absolute position (0-based)
+                start_pos = abs_position_map.get(node.uid, 0)
+                
+                # Get donor sequence to calculate length
+                donor_seq = node.data
+                donor_length = node.length
+                
+                # Find TSD information from events
+                tsd_seq = "NA"
+                tsd_5 = ""
+                tsd_3 = ""
+                for event in seq_tree.event_journal.events:
+                    if event.donor_uid == node.uid and event.tsd_info:
+                        tsd_info = event.tsd_info
+                        tsd_5 = tsd_info.get('tsd_5', '')
+                        tsd_3 = tsd_info.get('tsd_3', '')
+                        # Use 5' TSD as the TSD sequence
+                        if tsd_5:
+                            tsd_seq = tsd_5
+                        break
+                
+                # Adjust position and length to exclude TSD
+                if tsd_5:
+                    start_pos += len(tsd_5)
+                    donor_length -= len(tsd_5)
+                if tsd_3:
+                    donor_length -= len(tsd_3)
+                
+                # Skip if donor has zero length after TSD removal
+                if donor_length <= 0:
+                    continue
+                
+                # Calculate end position (BED uses half-open interval)
+                end_pos = start_pos + donor_length
+                
+                # Build name field with attributes
+                name_parts = []
+                
+                # Primary ID is donor_id if available, otherwise use UID
+                if node.donor_id:
+                    name_parts.append(node.donor_id)
+                else:
+                    name_parts.append(f"donor_{node.uid}")
+                
+                # Check if this donor was cut by another
+                cut_events = seq_tree.event_journal.find_target_events(node.uid)
+                if cut_events:
+                    for event in cut_events:
+                        cutter_node = seq_tree.node_dict.get(event.donor_uid)
+                        if cutter_node:
+                            cutter_id = cutter_node.donor_id if cutter_node.donor_id else f"donor_{event.donor_uid}"
+                            name_parts.append(f"CUT_BY:{cutter_id}")
+                
+                # Check if this donor is nested in another
+                # A donor is nested if it was inserted into a position that's inside another donor
+                for event in seq_tree.event_journal.events:
+                    if event.donor_uid == node.uid:
+                        # Check if the target was a donor
+                        target_node = seq_tree.node_dict.get(event.target_uid)
+                        if target_node and target_node.is_donor:
+                            host_id = target_node.donor_id if target_node.donor_id else f"donor_{event.target_uid}"
+                            name_parts.append(f"NESTED_IN:{host_id}")
+                        break
+
+                # Join name parts with semicolons
+                name = ";".join(name_parts)
+
+                # Create BED record (chrom start end name tsd strand)
+                bed_record = f"{chrom}\t{start_pos}\t{end_pos}\t{name}\t{tsd_seq}\t+"
+                bed_records.append(bed_record)
+        
+        return bed_records
+
     def __save_batch_results(self, output_dir: str, sequences: List[SeqRecord], 
                              donors: Optional[List[SeqRecord]], 
                              reconstructed_donors: Optional[List[SeqRecord]],
-                             batch_num: int = 1):
+                             batch_num: int = 1, seq_trees: List[Tuple[str, 'SequenceTree']] = None):
         """
         Save the batch results to output files.
 
@@ -448,6 +544,7 @@ class SeqGenerator:
             donors: List of donor records to save if tracking is enabled
             reconstructed_donors: List of reconstructed donor records
             batch_num: The batch number (1-based index)
+            seq_trees: List of tuples containing sequence ID and SequenceTree object
         """
         if not sequences:
             print("No sequences to save")
@@ -475,6 +572,23 @@ class SeqGenerator:
                 if clean_recs:
                     print(f"Saving {len(clean_recs)} clean reconstructed donor records")
                     output_dict[f"clean_reconstructed_donors{suffix}.fa"] = clean_recs
+
+        # Generate BED file if tracking is enabled and we have seq_trees
+        if self.flag_track and seq_trees:
+            bed_records = []
+            for seq_id, seq_tree in seq_trees:
+                if seq_tree:
+                    bed_records.extend(self._generate_bed_records(seq_id, seq_tree))
+            
+            if bed_records:
+                bed_filename = f"donors{suffix}.bed"
+                bed_filepath = os.path.join(output_dir, bed_filename)
+                print(f"Saving {len(bed_records)} BED records to {bed_filename}")
+                with open(bed_filepath, "w") as bed_file:
+                    # Write track header
+                    bed_file.write(f'track name="RandSeqInsert_Donors" description="Transposon insertions generated by RandSeqInsert" itemRgb="On"\n')
+                    for record in bed_records:
+                        bed_file.write(record + "\n")
 
         save_multi_fasta_from_dict(output_dict, output_dir)
 
